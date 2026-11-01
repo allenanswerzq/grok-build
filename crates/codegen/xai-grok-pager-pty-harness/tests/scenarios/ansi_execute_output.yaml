@@ -20,7 +20,9 @@ steps:
     text: BASH_SESSION_READY
     timeout_ms: 45000
   - action: paste_prompt
-    text: "! printf '\\033[1m\\033[36mbazel\\033[39;49m\\033[0m\\nAGENTS.md\\n'"
+    # Keep literal SGR codes out of the command header, so the assertion below
+    # checks rendered stdout rather than matching the command's own source.
+    text: "! printf '\\033[%sm\\033[%smbazel\\033[%sm\\033[%sm\\nAGENTS.md\\n' 1 36 '39;49' 0"
   - action: keys
     keys: "<Enter>"
   - action: wait_for_text
