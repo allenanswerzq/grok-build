@@ -120,6 +120,21 @@ pub(crate) fn acp_tool_update(
     tool_meta: Option<serde_json::Value>,
 ) -> Option<acp::ToolCallUpdate> {
     match output {
+        ToolOutput::ReadScreen(screen) => Some(acp::ToolCallUpdate::new(
+            acp::ToolCallId::new(Arc::from(tool_call_id)),
+            acp::ToolCallUpdateFields::new()
+                .status(Some(acp::ToolCallStatus::Completed))
+                .content(Some(vec![
+                    acp::ToolCallContent::from(acp::ContentBlock::Text(acp::TextContent::new(
+                        screen.prompt_text(),
+                    ))),
+                    acp::ToolCallContent::from(acp::ContentBlock::Image(acp::ImageContent::new(
+                        screen.screenshot.image.data.clone(),
+                        screen.screenshot.image.mime_type.clone(),
+                    ))),
+                ]))
+                .raw_output(raw_output_json(output, rewriter)),
+        )),
         ToolOutput::ReadFile(read_file_output) => {
             let (content, status) = match read_file_output {
                 ReadFileOutput::FileContent(file_content) => {

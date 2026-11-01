@@ -3218,6 +3218,17 @@ impl SessionActor {
             }
         }
         if !self.is_cursor_harness()
+            && let ToolsToolOutput::ReadScreen(screen) = output
+        {
+            let image = &screen.screenshot.image;
+            inline_images.push(ContentPart::Image {
+                url: std::sync::Arc::<str>::from(format!(
+                    "data:{};base64,{}",
+                    image.mime_type, image.data
+                )),
+            });
+        }
+        if !self.is_cursor_harness()
             && let ToolsToolOutput::ReadFile(ReadFileOutput::PdfPageImages(ref pdf)) = *output
         {
             for page in &pdf.pages {
