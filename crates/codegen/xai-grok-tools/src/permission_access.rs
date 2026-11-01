@@ -7,6 +7,8 @@ impl From<&crate::types::ToolInput> for AccessKind {
         use crate::types::ToolInput;
         match input {
             ToolInput::ReadFile(r) => AccessKind::Read(Some(r.path.clone())),
+            ToolInput::ReadScreen(_) => AccessKind::Read(None),
+            ToolInput::DrawOverlay(_) => AccessKind::Tool("draw_overlay".to_owned()),
             ToolInput::ListDir(l) => AccessKind::Read(Some(l.target_directory.clone())),
             ToolInput::CodexReadFile(r) => AccessKind::Read(Some(r.file_path.clone())),
             ToolInput::CodexListDir(l) => AccessKind::Read(Some(l.dir_path.clone())),

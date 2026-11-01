@@ -78,6 +78,7 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-util = { workspace = true, features = ["compat"] }
+tokio-tungstenite = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true, optional = true }
@@ -133,4 +134,5 @@ workspace = true
 default-bazel = ["serde"]
 default = ["serde"]
 serde = []
+live-tests = []
 dhat-heap = ["dep:dhat"]

@@ -1,0 +1,13 @@
+{
+  "name": "grok-screen-overlay-renderer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test renderer.test.js",
+    "build": "esbuild renderer.js --bundle --format=iife --minify --legal-comments=inline --outfile=renderer.bundle.js"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12",
+    "three": "0.185.0"
+  }
+}

@@ -1,13 +1,9 @@
-//! New-architecture tool implementations (NewTool trait).
+//! Grok Build tool implementations.
 //!
-//! Each sub-module here contains a tool that implements `NewTool` instead
-//! of the old `Tool` trait. During migration, old implementations live in
-//! `implementations/<tool>/` and new implementations live in
-//! `implementations/grok_build/<tool>/`.
-//!
-//! The [`register_all()`] function is the single entry-point for wiring up
-//! the standard toolset. It inserts shared resources (`Terminal`,
-//! `AvailableSkills`, `BashParams`) and registers every built-in tool.
+//! Tools implement [`xai_tool_runtime::Tool`] and
+//! [`crate::types::tool_metadata::ToolMetadata`]. The built-in registrations
+//! live in [`crate::registry::types::ToolRegistryBuilder`]; shared clients and
+//! session state are supplied through tool Resources.
 #[path = "app_builder_stub.rs"]
 pub mod app_builder;
 pub mod ask_user_question;
@@ -28,6 +24,7 @@ pub mod media_bearer;
 pub mod monitor;
 pub mod read_file;
 pub mod scheduler;
+pub mod screen;
 pub mod search_replace;
 pub mod send_feedback;
 pub mod send_subagent_message;
@@ -63,6 +60,7 @@ pub use scheduler::create::{
 };
 pub use scheduler::delete::{SCHEDULER_DELETE_TOOL_NAME, SchedulerDeleteTool};
 pub use scheduler::list::SchedulerListTool;
+pub use screen::{DrawOverlayTool, ReadScreenTool};
 pub use search_replace::SearchReplaceTool;
 pub use send_feedback::{SEND_FEEDBACK_TOOL_NAME, SendFeedbackTool};
 pub use send_subagent_message::{

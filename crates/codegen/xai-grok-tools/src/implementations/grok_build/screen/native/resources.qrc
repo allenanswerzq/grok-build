@@ -1,0 +1,5 @@
+<RCC><qresource prefix="/">
+<file>Main.qml</file>
+<file>overlay.html</file>
+<file alias="renderer.bundle.js">../renderer.bundle.js</file>
+</qresource></RCC>

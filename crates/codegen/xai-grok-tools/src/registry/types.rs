@@ -732,6 +732,8 @@ impl ToolRegistryBuilder {
         b.register::<grok_build::LspTool>();
         b.register::<grok_build::ImageGenTool>();
         b.register::<grok_build::ImageEditTool>();
+        b.register::<grok_build::ReadScreenTool>();
+        b.register::<grok_build::DrawOverlayTool>();
         b.register::<grok_build::ImageToVideoTool>();
         b.register::<grok_build::ReferenceToVideoTool>();
         b.register::<grok_build::EnterPlanModeTool>();

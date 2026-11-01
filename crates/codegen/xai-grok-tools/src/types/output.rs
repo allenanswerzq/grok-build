@@ -160,7 +160,28 @@ pub(crate) fn typed_tool_output_preserving_cco(
 ) -> xai_tool_runtime::TypedToolOutput {
     let cco = source.chat_completion_output();
     let value = serde_json::to_value(payload).unwrap_or(serde_json::Value::Null);
-    xai_tool_runtime::TypedToolOutput::from_value(tool_id, value).with_chat_completion_output(cco)
+    let prompt_text = value
+        .get("prompt_text")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned);
+    let mut typed = xai_tool_runtime::TypedToolOutput::from_value(tool_id, value)
+        .with_chat_completion_output(cco);
+    let custom = source.model_output();
+    if !custom.is_empty() {
+        // ToolRunResult's text includes reminders. Preserve it while carrying the
+        // tool's explicit vision blocks across the legacy runner boundary.
+        typed.model_output =
+            if let Some(text) = prompt_text {
+                std::iter::once(xai_tool_runtime::ContentBlock::Text { text })
+                    .chain(custom.into_iter().filter(|block| {
+                        !matches!(block, xai_tool_runtime::ContentBlock::Text { .. })
+                    }))
+                    .collect()
+            } else {
+                custom
+            };
+    }
+    typed
 }
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ListDirContent {
@@ -573,6 +594,7 @@ pub enum ToolOutput {
     BackgroundTaskStarted(BackgroundTaskStarted),
     GrepSearch(GrepSearchOutput),
     ReadFile(ReadFileOutput),
+    ReadScreen(crate::implementations::grok_build::screen::ReadScreenOutput),
     ListDir(ListDirOutput),
     SearchReplace(SearchReplaceOutput),
     Todo(TodoWriteOutput),
@@ -654,6 +676,7 @@ impl ToolOutput {
     /// Render tool output for inclusion in the model prompt with specified format.
     pub fn to_prompt_format(&self) -> String {
         match self {
+            ToolOutput::ReadScreen(screen) => screen.prompt_text(),
             ToolOutput::ReadFile(read_file_output) => match read_file_output {
                 ReadFileOutput::FileContent(file_content) if file_content.content.is_empty() => {
                     if file_content.total_lines == 0 {
@@ -1165,6 +1188,12 @@ impl MCPOutput {
     }
 }
 impl xai_tool_runtime::ToolOutput for ToolOutput {
+    fn model_output(&self) -> Vec<xai_tool_runtime::ContentBlock> {
+        match self {
+            Self::ReadScreen(screen) => xai_tool_runtime::ToolOutput::model_output(screen),
+            _ => Vec::new(),
+        }
+    }
     fn chat_completion_output(&self) -> Option<xai_tool_runtime::ToolChatCompletionResponse> {
         match self {
             Self::Bash(bash) => xai_tool_runtime::ToolOutput::chat_completion_output(bash),
