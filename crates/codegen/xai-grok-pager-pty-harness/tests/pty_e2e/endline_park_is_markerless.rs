@@ -1,6 +1,6 @@
 //! PTY, fully flag-file driven: the model backgrounds a flag-gated command.
 //! The test extracts the runtime task id and enqueues a blocking `get_command_or_subagent_output` on it (the park).
-//! It then types mid-park (cancel-and-send).
+//! It then queues a message mid-park and sends it immediately with empty Enter.
 //! Asserts exactly ONE "Worked for" marker (the new turn's), with no park row and no "Turn cancelled by user" marker.
 #[allow(unused_imports)]
 use super::common::*;
@@ -123,7 +123,11 @@ async fn endline_park_is_markerless() {
         .inject_keys(b"hurry up please")
         .expect("type mid-park");
     harness.update(Duration::from_millis(300));
-    harness.inject_keys(b"\r").expect("submit mid-park prompt");
+    harness.inject_keys(b"\r").expect("queue mid-park prompt");
+    harness
+        .wait_for_text("1 queued, Enter to send now", Duration::from_secs(10))
+        .expect("queued prompt is ready for immediate submission");
+    harness.inject_keys(b"\r").expect("send queued prompt now");
 
     harness
         .wait_for_text("ENDLINE_FINAL_ANSWER", Duration::from_secs(90))
