@@ -72,11 +72,18 @@ Requirements:
 - macOS and Linux are supported build hosts; Windows builds are best-effort
   and not currently tested from this tree.
 
+On Omarchy/Linux, use the root [`justfile`](justfile) for consistent local builds.
+It requires `just`, `kache`, and the [native overlay dependencies](crates/codegen/xai-grok-tools/src/implementations/grok_build/screen/README.md#draw-independently-on-the-desktop).
+
 ```sh
-cargo run -p xai-grok-pager-bin              # build + launch the TUI
-cargo build -p xai-grok-pager-bin --release  # release binary: target/release/xai-grok-pager
-cargo check -p xai-grok-pager-bin            # fast validation
+just build  # build the CLI and native overlay with kache
+just run    # build + launch the normal TUI
+just check  # check the CLI composition root
+just cache  # inspect this checkout's latest cache activity
 ```
+
+The local binary is `target/debug/xai-grok-pager`. Screen reading and desktop
+overlays are enabled in the default toolset. `just` lists all available commands.
 
 The binary artifact is named `xai-grok-pager`; official installs ship it as
 `grok`. On first launch it opens your browser to authenticate — see the
@@ -113,11 +120,15 @@ MCP servers, skills, plugins, hooks, headless mode, sandboxing, and more.
 ## Development
 
 ```sh
-cargo check -p <crate>        # always target specific crates; full-workspace builds are slow
-cargo test -p xai-grok-config # per-crate tests
-cargo clippy -p <crate>       # lint config: clippy.toml at the repo root
-cargo fmt --all               # rustfmt.toml at the repo root
+just check xai-grok-tools    # check the affected crate
+just test xai-grok-config   # per-crate tests
+just lint xai-grok-agent    # lint config: clippy.toml at the repo root
+just test-live              # requires managed Chrome and an awake, unlocked desktop
 ```
+
+Use `just build` for app rebuilds. `just build-workspace` explicitly opts into the
+full Cargo workspace; switching build scopes changes dependency feature sets and
+cache keys.
 
 ## Contributing
 
