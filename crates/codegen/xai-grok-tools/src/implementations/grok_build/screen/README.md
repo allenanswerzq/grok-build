@@ -66,25 +66,28 @@ It performs no desktop rendering.
 ## Draw independently on the desktop
 
 The Linux backend requires a layer-shell-capable Wayland compositor, tested on
-Hyprland. It creates its own transparent Wayland layer surface through
-LayerShellQt. A small Qt Quick/WebEngine host runs our trusted bundled SVG/Three.js
-renderer. Rust validates arguments, owns the child process, and communicates over
-private stdin/stdout pipes. No Chrome instance, CDP endpoint, tab, or observation
-ID is required. No machine configuration is modified.
+Hyprland. The Rust `grok-overlay-host` uses Smithay Client Toolkit to own a
+transparent overlay surface. `tiny-skia` draws annotations, `cosmic-text` shapes
+literal text with system fonts, and `wgpu` renders the five built-in 3D meshes
+through Vulkan. Rust owns the process and communicates over private stdin/stdout
+pipes. No Chrome instance, CDP endpoint, tab, or observation ID is required.
+No machine configuration is modified.
 
-`just build` builds both the CLI and native host. To rebuild only the native host
-from the repository root:
+`just build` builds both the CLI and native host with kache. To rebuild only the
+native host:
 
 ```sh
 just overlay
 ```
 
-Dependencies are Qt 6.9 or newer with Quick, WebEngineQuick, and Wayland, plus
-LayerShellQt, qmake6, make, and a C++ compiler. This machine already has them.
-The recipes use kache for Rust and native compilation.
-The binary lands in `target/debug/grok-overlay-host`. The Rust backend locates it
+Building the overlay needs Rust, Wayland development libraries, pkg-config, and
+libxkbcommon. Runtime needs a Wayland session and system fonts; 3D additionally
+needs a Vulkan driver. All dependencies are locked in `Cargo.lock`; there is no
+Qt, C++ host, npm build, embedded web view, or downloaded renderer bundle.
+The binary lands in `target/debug/grok-overlay-host`. The backend locates it
 beside its executable, through PATH, or from `GROK_OVERLAY_HOST`.
-Cargo builds stay independent of Qt so headless tool tests need no desktop packages.
+The native dependencies are behind `native-overlay`; normal CLI and headless
+provider tests do not require that feature.
 
 ```json
 {"action":"show","output":"eDP-1","scene":{"kind":"annotations","items":[{"kind":"rectangle","x":100,"y":100,"width":300,"height":160,"color":"#ff3366"},{"kind":"text","x":100,"y":80,"text":"Look here","color":"#ffffff"}]}}
@@ -101,7 +104,9 @@ Cargo builds stay independent of Qt so headless tool tests need no desktop packa
 `output` names a desktop monitor, independently of application targets. Omit it
 to retain a visible overlay's monitor. When opening a surface, the compositor
 chooses its active output. Annotation coordinates are logical units
-from that output's upper-left corner; display scale is handled by Qt. A Chrome
+from that output's upper-left corner; the host handles integer
+and fractional display scale using Wayland's fractional-scale/viewporter protocols,
+with integer buffer scaling as a fallback. A Chrome
 page's viewport coordinates alone do not locate it on the desktop. Precise
 annotations of application controls will require a native window observation and
 coordinate mapping in a subsequent provider.
@@ -121,13 +126,19 @@ clicks pass through except at the Close/Reset buttons and
 the projected bounding rectangle around 3D objects. When the model bounds cross
 the camera's near plane, interaction covers the output. Resizing dismisses the
 current scene. Cancellation, protocol failure,
-and session teardown terminate the whole helper process group, including its
-WebEngine subprocesses. An injected `ProcessScope` in session Resources also
+and session teardown terminate the whole helper process group. An injected `ProcessScope` in session Resources also
 allows a supervisor to terminate a retained host. Monitor removal dismisses the surface.
 Operations time out after 20 seconds. Scenes contain 1–256 validated items and
 requests are bounded to 1 MiB. No model-supplied code, HTML, URLs, shaders, or
-external assets run; text uses `textContent`. The web view uses a private profile
-and a restrictive CSP, with remote requests and navigation disabled.
+external assets run. Text is shaped as literal Unicode rather than interpreted as
+markup. Rendering does not make network requests.
+
+The host renders only when the scene, scale, or interaction changes. 3D frames
+are rendered offscreen on the GPU, read back, and presented in shared-memory
+Wayland buffers alongside raster text. This keeps the presentation path in safe
+Rust and works without GPU window-handle interop, at the cost of a readback and
+copy per changed frame. Raster allocation is capped at 128 MiB per frame and
+16,384 pixels per dimension; 3D also obeys the graphics device's texture limit.
 
 `OverlayRenderer::draw_overlay` is the desktop backend boundary. Insert an
 `OverlayBackend` into session Resources to replace the Linux implementation.
@@ -164,10 +175,14 @@ just test-live
 Normal tests cover independent provider routing, argument validation, permissions,
 vision output, bounded process protocol, host reuse, teardown, cancellation, and
 supervisor shutdown.
-They use synthetic local processes and need no Chrome or Qt. `grok-overlay-test`
-is an opt-in native GUI test using only its own surface: native pixels,
-transparency, input regions, all primitives, orbit, zoom, pan, reset,
-and dismissal. Chrome tests create and dispose private browser contexts, covering
+They use synthetic local processes and need no desktop. `just test-renderer`
+checks logical geometry, scaled raster pixels, multilingual literal text,
+premultiplied transparency, bounded allocations, and pointer gesture rules.
+`just test-native` additionally renders every primitive with real Vulkan,
+checks camera changes against actual pixels, and exercises a real Wayland layer
+with virtual-pointer orbit, zoom, pan, Reset, Close, and reopening. Button presses
+target the test's own overlay and the original cursor position is restored.
+Chrome tests create and dispose private browser contexts, covering
 the real tool at integer/fractional scales and scroll positions, and watcher
 upgrades/root replacement. The native Rust live
 test verifies the real tool-to-host-to-compositor path without Chrome.
@@ -178,17 +193,11 @@ visible Chrome AX text and a screen PNG to inference, then show and clear a nati
 fail the test even when mock inference returns a final response. No real model
 credentials are used.
 
-`renderer.bundle.js` is committed; runtime use needs no npm or network access.
-It bundles Three.js 0.185.0 and OrbitControls using esbuild 0.25.12. The upstream
-MIT license is retained in `THREE-LICENSE` and bundle comments. Rebuild it from
-the repository root with `just renderer`, then use `just overlay` to embed the
-changed resource. Renderer recipes install the pinned npm dependencies with lifecycle
-scripts disabled. `just test-renderer` runs renderer tests with real Three geometry and OrbitControls and a
-GPU/DOM fixture, including off-screen pan recovery and scene cleanup.
+Porting decisions and old-to-new test mappings are in [native/PORTING.md](native/PORTING.md).
 
 Protocol references: [Chrome Accessibility](https://chromedevtools.github.io/devtools-protocol/tot/Accessibility/),
 [Page](https://chromedevtools.github.io/devtools-protocol/tot/Page/),
 [DOMSnapshot](https://chromedevtools.github.io/devtools-protocol/tot/DOMSnapshot/),
 [Wayland layer-shell](https://wayland.app/protocols/wlr-layer-shell-unstable-v1),
-[Qt WebEngineView](https://doc.qt.io/qt-6/qml-qtwebengine-webengineview.html), and
-[Three.js OrbitControls](https://threejs.org/docs/pages/OrbitControls.html).
+[Smithay Client Toolkit](https://docs.rs/smithay-client-toolkit/0.21.1/smithay_client_toolkit/),
+and [wgpu](https://docs.rs/wgpu/30.0.1/wgpu/).

@@ -105,6 +105,13 @@ nix = { workspace = true, features = ["signal", "process", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
+bytemuck = { version = "1", features = ["derive"], optional = true }
+cosmic-text = { version = "0.19", optional = true }
+glam = { version = "0.34", optional = true }
+pollster = { version = "0.4", optional = true }
+smithay-client-toolkit = { version = "0.21", features = ["system"], optional = true }
+tiny-skia = { workspace = true, optional = true }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "vulkan", "wgsl"], optional = true }
 
 # windows: util::spawn uses Win32 Job Objects (CreateJobObjectW,
 # AssignProcessToJobObject, TerminateJobObject) and process creation flags
@@ -135,4 +142,10 @@ default-bazel = ["serde"]
 default = ["serde"]
 serde = []
 live-tests = []
+native-overlay = ["dep:bytemuck", "dep:cosmic-text", "dep:glam", "dep:pollster", "dep:smithay-client-toolkit", "dep:tiny-skia", "dep:wgpu"]
 dhat-heap = ["dep:dhat"]
+
+[[bin]]
+name = "grok-overlay-host"
+path = "src/implementations/grok_build/screen/native/main.rs"
+required-features = ["native-overlay"]

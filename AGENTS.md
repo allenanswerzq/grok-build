@@ -9,7 +9,9 @@ package selection, profiles, job count, and kache settings consistent.
   crate. Omit the crate to use each recipe's documented default.
 - `just test-live`: run the Chrome/native/default-agent live checks. This requires
   managed Chrome, an unlocked desktop, and a powered-on display.
-- `just test-screen`, `just test-renderer`, `just test-native`: validate the screen tools and renderer.
+- `just test-screen`, `just test-renderer`: validate screen tools and the Rust renderer headlessly.
+- `just test-native`: test real Vulkan pixels and Wayland pointer interaction on an unlocked desktop.
+- `just lint-native`: lint the Rust overlay host and renderer.
 - `just test-pty`: exercise the queued-message and ANSI output fixtures against the built CLI.
 - `just doc <crate>`: generate affected-crate API documentation.
 - `just cache`, `just cache-explain`: inspect this checkout's cache activity.

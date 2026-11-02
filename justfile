@@ -2,7 +2,6 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 
 export RUSTC_WRAPPER := "kache"
 jobs := "2"
-screen := "crates/codegen/xai-grok-tools/src/implementations/grok_build/screen"
 
 # List the development commands.
 default:
@@ -17,13 +16,11 @@ cli:
 
 # Build the native overlay with kache and place it beside the CLI.
 overlay:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p target/native-overlay target/debug
-    cd target/native-overlay
-    qmake6 ../../{{ screen }}/native/overlay.pro "QMAKE_CC=kache gcc" "QMAKE_CXX=kache g++"
-    make -j {{ jobs }}
-    install -m755 grok-overlay-host ../debug/grok-overlay-host
+    cargo build -p xai-grok-tools --bin grok-overlay-host --features native-overlay --locked -j {{ jobs }}
+
+# Resolve/download overlay dependencies after a manifest change.
+fetch:
+    cargo fetch
 
 # Build and launch the TUI with its default tools.
 run: build
@@ -32,6 +29,10 @@ run: build
 # Check one crate; use the CLI composition root by default.
 check crate="xai-grok-pager-bin":
     cargo check -p {{ quote(crate) }} --locked -j {{ jobs }}
+
+# Format Rust sources.
+fmt:
+    cargo fmt --all
 
 # Check Rust formatting without changing sources.
 fmt-check:
@@ -45,28 +46,17 @@ test crate="xai-grok-agent":
 test-screen:
     cargo test -p xai-grok-tools --lib --locked -j {{ jobs }} implementations::grok_build::screen
 
-# Install the pinned renderer build/test dependencies without lifecycle scripts.
-[private]
-renderer-deps:
-    cd {{ screen }} && npm ci --ignore-scripts --no-audit --no-fund
+# Run native renderer/camera/input tests without requiring a desktop or GPU.
+test-renderer:
+    cargo test -p xai-grok-tools --bin grok-overlay-host --features native-overlay --locked -j {{ jobs }}
 
-# Run renderer behavior tests with real Three.js geometry and controls.
-test-renderer: renderer-deps
-    cd {{ screen }} && npm test
-
-# Rebuild the committed renderer bundle; no npm is required at runtime.
-renderer: renderer-deps
-    cd {{ screen }} && npm run build
-
-# Test native pixels, transparency, input regions, and 3D interaction.
+# Test Vulkan pixels and real Wayland interaction (requires an unlocked desktop).
 test-native:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    mkdir -p target/native-overlay-test
-    cd target/native-overlay-test
-    qmake6 ../../{{ screen }}/native/test.pro "QMAKE_CC=kache gcc" "QMAKE_CXX=kache g++"
-    make -j {{ jobs }}
-    QT_QPA_PLATFORM=wayland QT_FORCE_STDERR_LOGGING=1 ./grok-overlay-test
+    cargo test -p xai-grok-tools --bin grok-overlay-host --test overlay_native_live --features native-overlay,live-tests --locked -j {{ jobs }} -- --nocapture --test-threads=1
+
+# Lint the Rust Wayland host and renderer.
+lint-native:
+    cargo clippy -p xai-grok-tools --bin grok-overlay-host --test overlay_native_live --features native-overlay,live-tests --locked -j {{ jobs }} -- -D warnings
 
 # Check screen-tool code, examples, and live-test compilation.
 lint-screen:

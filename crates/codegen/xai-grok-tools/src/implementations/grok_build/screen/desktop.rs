@@ -86,7 +86,7 @@ impl DesktopOverlay {
             }
         }
         Err(failure(
-            "Cannot find grok-overlay-host. Build screen/native/overlay.pro with qmake6 and make (see screen/README.md), or set GROK_OVERLAY_HOST to its executable",
+            "Cannot find grok-overlay-host. Run just overlay from the repository root (see screen/README.md), or set GROK_OVERLAY_HOST to its executable",
         ))
     }
 
@@ -164,8 +164,6 @@ impl Host {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
-            .env("QT_QPA_PLATFORM", "wayland")
-            .env("QT_FORCE_STDERR_LOGGING", "1")
             .kill_on_drop(true);
         let (mut child, group) = scope
             .spawn(command)
@@ -201,7 +199,7 @@ impl Host {
             .map_err(failure)?;
         if response.len() as u64 > MAX_RESPONSE || response.last() != Some(&b'\n') {
             return Err(failure(
-                "Native host disconnected or returned an oversized response; verify Qt WebEngine and LayerShellQt are installed",
+                "Native host disconnected or returned an oversized response; verify the Wayland session and Vulkan driver are available",
             ));
         }
         serde_json::from_slice(&response).map_err(failure)
@@ -210,8 +208,7 @@ impl Host {
 
 impl Drop for Host {
     fn drop(&mut self) {
-        // Qt WebEngine owns renderer subprocesses. Kill the complete group
-        // before Child's kill-on-drop reaps its leader.
+        // Kill the complete session-owned group before reaping its leader.
         let _ = self.group.kill();
     }
 }
