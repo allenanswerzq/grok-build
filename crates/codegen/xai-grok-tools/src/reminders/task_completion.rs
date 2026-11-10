@@ -662,6 +662,7 @@ pub fn consumed_completion_ids(output: &ToolOutput) -> Vec<&str> {
         | ToolOutput::BackgroundTaskStarted(_)
         | ToolOutput::GrepSearch(_)
         | ToolOutput::ReadFile(_)
+        | ToolOutput::ScreenRead(_)
         | ToolOutput::ListDir(_)
         | ToolOutput::SearchReplace(_)
         | ToolOutput::Todo(_)

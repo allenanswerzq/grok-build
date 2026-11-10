@@ -15,6 +15,10 @@ default-run = "xai-grok-pager"
 name = "xai-grok-pager"
 path = "src/main.rs"
 
+[[bin]]
+name = "grok-screen-overlay"
+path = "src/screen_overlay.rs"
+
 [dependencies]
 # The pager library (all application logic + the public API main.rs drives).
 xai-grok-pager = { path = "../xai-grok-pager", default-features = false }
@@ -25,6 +29,7 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features 
 xai-grok-cloud-config = { workspace = true }
 xai-grok-login = { workspace = true }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
+xai-grok-tools = { workspace = true }
 xai-grok-update = { path = "../xai-grok-update", default-features = false }
 xai-grok-version = { workspace = true }
 xai-grok-telemetry = { workspace = true }

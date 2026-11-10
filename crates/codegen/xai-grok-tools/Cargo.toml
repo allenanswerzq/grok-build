@@ -78,6 +78,7 @@ tokio = { workspace = true, features = [
     "sync",
 ] }
 tokio-util = { workspace = true, features = ["compat"] }
+tokio-tungstenite = { workspace = true }
 tonic = { workspace = true }
 tracing = { workspace = true }
 unicode-normalization = { workspace = true, optional = true }
@@ -104,6 +105,12 @@ nix = { workspace = true, features = ["signal", "process", "fs"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = { workspace = true }
+bytemuck = { version = "1", features = ["derive"] }
+cosmic-text = "0.19"
+glam = "0.34"
+pollster = "0.4"
+smithay-client-toolkit = { version = "0.21", features = ["system"] }
+wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "vulkan", "wgsl"] }
 
 # windows: util::spawn uses Win32 Job Objects (CreateJobObjectW,
 # AssignProcessToJobObject, TerminateJobObject) and process creation flags
@@ -133,4 +140,5 @@ workspace = true
 default-bazel = ["serde"]
 default = ["serde"]
 serde = []
+live-tests = []
 dhat-heap = ["dep:dhat"]

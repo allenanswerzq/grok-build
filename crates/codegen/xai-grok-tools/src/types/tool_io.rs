@@ -23,6 +23,8 @@ use crate::implementations::grok_build::image_edit::ImageEditInput;
 use crate::implementations::grok_build::image_gen::ImageGenInput;
 use crate::implementations::grok_build::list_dir::ListDirInput;
 use crate::implementations::grok_build::read_file::ReadFileInput;
+use crate::implementations::grok_build::screen_draw::ScreenDrawInput;
+use crate::implementations::grok_build::screen_read::ScreenReadInput;
 use crate::implementations::grok_build::search_replace::SearchReplaceInput;
 use crate::implementations::grok_build::send_feedback::SendFeedbackInput;
 use crate::implementations::grok_build::send_subagent_message::SendSubagentMessageInput;
@@ -55,6 +57,8 @@ pub struct MCPToolInput {
 #[serde(tag = "variant")]
 pub enum ToolInput {
     ReadFile(ReadFileInput),
+    ScreenRead(ScreenReadInput),
+    ScreenDraw(ScreenDrawInput),
     SearchReplace(SearchReplaceInput),
     Bash(BashToolInput),
     Grep(GrepSearchInput),
