@@ -1,0 +1,30 @@
+[package]
+name = "grok-lean"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+publish = false
+
+# A second composition root over the same pager, agent, and tools as `xai-grok-pager-bin`,
+# started with lean defaults. `screen_draw` finds `grok-screen-overlay` beside this binary,
+# so build that `xai-grok-pager-bin` target into the same profile.
+
+[dependencies]
+anyhow = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+xai-crash-handler = { path = "../xai-crash-handler" }
+xai-grok-extra-ca = { workspace = true }
+xai-grok-pager = { path = "../xai-grok-pager", default-features = false, features = ["sandbox-enforce"] }
+xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features = false }
+xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
+xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
+xai-grok-workspace = { workspace = true }
+xai-tty-utils = { workspace = true }
+
+[target.'cfg(unix)'.dependencies]
+tikv-jemalloc-sys = { workspace = true }
+tikv-jemallocator = { workspace = true }
+
+[lints]
+workspace = true

@@ -330,6 +330,9 @@ pub fn emit_event_with_origin<T: Serialize + Send + 'static>(
     event_suffix: impl Into<String>,
     data: T,
 ) {
+    if !cfg!(feature = "export") {
+        return;
+    }
     let (event_name, ctx_snapshot, activity, data) = take_emit_context(origin, event_suffix, data);
 
     // `tokio::spawn` panics without a runtime. Skip before register so PENDING_EVENTS
@@ -352,6 +355,9 @@ pub async fn emit_event_with_origin_now<T: Serialize + Send + 'static>(
     event_suffix: impl Into<String>,
     data: T,
 ) {
+    if !cfg!(feature = "export") {
+        return;
+    }
     let (event_name, ctx_snapshot, activity, data) = take_emit_context(origin, event_suffix, data);
     post_event(event_name, ctx_snapshot, activity, data).await;
 }

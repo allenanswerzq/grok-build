@@ -3,25 +3,11 @@ use std::rc::Rc;
 
 use rhai::{Dynamic, EvalAltResult, Position};
 use tokio::sync::{mpsc, oneshot};
-use tokio_util::sync::CancellationToken;
 
 use crate::host::{AgentOpts, HostError, WorkflowHostRequest};
 use crate::journal::{HOST_ERROR_KEY, Journal, JournalError, request_hash};
-use crate::run::{PauseKind, WorkflowOutcome};
+use crate::run::{PauseKind, WorkflowOutcome, WorkflowRunParams};
 use crate::{MAX_HOST_CALLS, MAX_PARALLEL};
-
-pub struct WorkflowRunParams {
-    pub script: String,
-    pub args: serde_json::Value,
-    pub journal: Journal,
-    pub host_tx: mpsc::UnboundedSender<WorkflowHostRequest>,
-    pub cancel: CancellationToken,
-    pub max_ops: u64,
-}
-
-impl WorkflowRunParams {
-    pub const DEFAULT_MAX_OPS: u64 = 100_000_000;
-}
 
 #[derive(Debug, Clone)]
 enum ControlToken {
@@ -869,6 +855,7 @@ fn register_host_fns(engine: &mut rhai::Engine, ctx: &Rc<RefCell<Ctx>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio_util::sync::CancellationToken;
     use crate::host::{AgentResult, BudgetState};
 
     fn spawn_mock_host(

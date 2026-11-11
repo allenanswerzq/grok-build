@@ -153,6 +153,9 @@ pub fn init(cfg: Option<ExternalOtelConfig>) {
 }
 
 fn build_handle(cfg: ExternalOtelConfig) -> Option<Arc<ExternalTelemetry>> {
+    if !cfg!(feature = "export") {
+        return None;
+    }
     // If the internal firehose resolved its endpoint/headers from `OTEL_EXPORTER_OTLP_*` (the deprecated fallback), refuse to activate
     // This check, in code rather than release discipline, keeps the same events from going out twice
     if cfg.internal_pipeline_consumed_otel_vars {
@@ -335,6 +338,9 @@ pub fn is_active() -> bool {
 /// No-op unless the stream is active and the event has an `external = …` mapping.
 /// Synchronous and cheap (the batch processor queues; nothing blocks on I/O).
 pub fn emit<T: crate::events::TelemetryEvent>(data: &T) {
+    if !cfg!(feature = "export") {
+        return;
+    }
     // Fail-closed: suppress until the leader confirms the remote policy; open by default for everyone else
     if !is_settings_gate_open() {
         return;

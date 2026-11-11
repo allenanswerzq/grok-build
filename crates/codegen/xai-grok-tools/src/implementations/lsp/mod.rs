@@ -54,6 +54,30 @@ pub enum LspError {
 pub type DiagnosticsNotify = Arc<tokio::sync::Notify>;
 pub type LspMainLoop = async_lsp::MainLoop<async_lsp::router::Router<()>>;
 
+/// Starts language servers for `servers` in the background, or returns `None` when there are none
+/// or this build has no LSP client (the `lsp` feature).
+pub fn start(
+    servers: std::collections::BTreeMap<String, config::LspServerConfig>,
+    workspace_root: std::path::PathBuf,
+    process_scope: Option<crate::util::ProcessScope>,
+) -> Option<Arc<dyn LspBackend>> {
+    if !cfg!(feature = "lsp") || servers.is_empty() {
+        return None;
+    }
+    let manager = LspManager::new(
+        servers,
+        workspace_root,
+        true,
+        crate::notification::ToolNotificationHandle::noop(),
+    )
+    .with_process_scope(process_scope);
+    let adapter = Arc::new(LspBackendAdapter::new(Arc::new(tokio::sync::Mutex::new(
+        manager,
+    ))));
+    adapter.ensure_started_background();
+    Some(adapter)
+}
+
 pub fn file_uri(path: &Path) -> Result<Url, LspError> {
     Url::from_file_path(path).map_err(|_| LspError::InvalidPath)
 }

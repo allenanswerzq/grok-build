@@ -80,6 +80,7 @@ fn resolve_appearance_chain(
 
 /// Desktop APIs only. `grok wrap` stamps the local OS theme before SSH; env hints may be a previous hop's snapshot.
 #[must_use]
+#[cfg(feature = "desktop-appearance")]
 pub fn detect_desktop() -> Option<SystemAppearance> {
     match dark_light::detect() {
         Ok(dark_light::Mode::Dark) => Some(SystemAppearance::Dark),
@@ -87,6 +88,13 @@ pub fn detect_desktop() -> Option<SystemAppearance> {
         // Mode::Unspecified or Err: no system preference detected
         _ => None,
     }
+}
+
+/// Without the `desktop-appearance` feature, detection starts at the environment and terminal steps.
+#[must_use]
+#[cfg(not(feature = "desktop-appearance"))]
+pub fn detect_desktop() -> Option<SystemAppearance> {
+    None
 }
 
 fn detect_without_mock() -> Option<SystemAppearance> {

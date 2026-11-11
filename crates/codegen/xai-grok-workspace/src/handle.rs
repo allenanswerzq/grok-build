@@ -573,22 +573,7 @@ impl WorkspaceHandle {
                     sourced,
                     config.project_lsp_trusted,
                 );
-            if servers.is_empty() {
-                None
-            } else {
-                use xai_grok_tools::implementations::lsp::{
-                    LspBackend, LspBackendAdapter, LspManager,
-                };
-                let mgr = Arc::new(tokio::sync::Mutex::new(LspManager::new(
-                    servers,
-                    config.root_cwd.clone(),
-                    true,
-                    xai_grok_tools::notification::ToolNotificationHandle::noop(),
-                )));
-                let adapter = Arc::new(LspBackendAdapter::new(mgr));
-                adapter.ensure_started_background();
-                Some(adapter)
-            }
+            xai_grok_tools::implementations::lsp::start(servers, config.root_cwd.clone(), None)
         };
         let session_event_writers: Arc<
             dashmap::DashMap<String, xai_grok_session_events::EventWriter>,

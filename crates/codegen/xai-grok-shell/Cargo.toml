@@ -5,7 +5,27 @@ version = "1.0.45"
 edition.workspace = true
 
 [features]
-default = []
+default = [
+    "memory",
+    "plugins",
+    "services",
+    "subagents",
+    "worktrees",
+    "xai-codebase-graph/grammars",
+    "xai-grok-mcp/connect",
+    "xai-workflow/engine",
+]
+# Session memory: capture, dream consolidation, flush, and the memory tools.
+memory = []
+# Plugins, the marketplace, hooks, and skills.
+plugins = []
+# xAI account and product services: cloud sandboxes, billing, sharing, feedback, suggestions,
+# recaps, consent, PR and review helpers, and bundles.
+services = []
+# The subagent coordinator behind the task tool.
+subagents = []
+# Git worktrees for sessions.
+worktrees = []
 dhat-heap = ["dep:dhat"]
 # Session synthesis + in-process e2e harness (`session::testkit`) for soak,
 # load, and bench tests. Off by default; the tests/benches that use it declare
@@ -29,6 +49,11 @@ default-bazel = [
     "local-workspace",
     "test-support",
     "config-docs",
+    "memory",
+    "plugins",
+    "services",
+    "subagents",
+    "worktrees",
 ]
 
 [dependencies]
@@ -105,7 +130,6 @@ rustls = { version = "0.23", default-features = false, features = [
 futures-util = { workspace = true }
 urlencoding = { workspace = true }
 gethostname = { workspace = true }
-gcloud-storage = { workspace = true }
 git2 = { version = "0.20", default-features = false, features = [
     "vendored-libgit2",
 ] }
@@ -114,7 +138,7 @@ notify-debouncer-mini = { workspace = true }
 nucleo = { workspace = true }
 arc-swap = { workspace = true }
 infer = "0.15"
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 moka = { workspace = true, features = ["future"] }
 dhat = { workspace = true, optional = true }
 base64 = { workspace = true }
@@ -130,7 +154,7 @@ xai-grok-shared = { workspace = true }
 xai-grok-status-line = { workspace = true }
 xai-tracing-macros = { path = "../xai-tracing-macros" }
 xai-fsnotify = { path = "../xai-fsnotify" }
-xai-codebase-graph = { path = "../xai-codebase-graph" }
+xai-codebase-graph = { path = "../xai-codebase-graph", default-features = false }
 xai-hunk-tracker = { path = "../xai-hunk-tracker" }
 xai-agent-lifecycle = { workspace = true }
 xai-interjection-core = { workspace = true }
@@ -148,9 +172,9 @@ xai-grok-sampler = { path = "../xai-grok-sampler" }
 xai-grok-session-search = { workspace = true }
 xai-token-estimation = { workspace = true }
 xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
-xai-grok-tools = { path = "../xai-grok-tools" }
+xai-grok-tools = { workspace = true }
 xai-tty-utils = { workspace = true }
-xai-workflow = { path = "../xai-workflow" }
+xai-workflow = { path = "../xai-workflow", default-features = false }
 xai-grok-workspace = { workspace = true }
 # Backs the compatibility-only `xai_grok_shell::foreign_sessions` re-export.
 xai-grok-foreign-sessions = { workspace = true }
@@ -168,7 +192,7 @@ xai-grok-memory = { workspace = true }
 xai-grok-hooks = { path = "../xai-grok-hooks" }
 xai-hooks-plugins-types = { path = "../xai-hooks-plugins-types" }
 xai-grok-plugin-marketplace = { path = "../xai-grok-plugin-marketplace" }
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { workspace = true }
 xai-grok-otel = { workspace = true }
 xai-grok-session-events = { workspace = true }
 xai-grok-auth = { workspace = true, features = ["middleware"] }
@@ -204,6 +228,8 @@ siphasher = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
+# Tests cover the extra image formats.
+xai-grok-image = { workspace = true, features = ["extra-formats"] }
 xai-dirs = { workspace = true }
 xai-grok-status-line = { workspace = true, features = ["test-support"] }
 criterion = { workspace = true }

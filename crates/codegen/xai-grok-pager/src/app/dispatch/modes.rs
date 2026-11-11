@@ -30,6 +30,9 @@ pub(super) fn dispatch_enter_plan_mode(
     app: &mut AppView,
     description: Option<String>,
 ) -> Vec<Effect> {
+    if refuse_if_plan_off(app) {
+        return vec![];
+    }
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -114,6 +117,9 @@ pub(super) fn set_plan_mode(
     app: &mut AppView,
     kind: crate::app::actions::PlanModeKind,
 ) -> Vec<Effect> {
+    if kind.to_bool() && refuse_if_plan_off(app) {
+        return vec![];
+    }
     let ActiveView::Agent(id) = app.active_view else {
         return vec![];
     };
@@ -178,6 +184,14 @@ pub(super) fn set_plan_mode(
         session_id,
         mode_id,
     }]
+}
+
+/// Toasts and returns true when plan mode is off for this run (`--no-plan`).
+fn refuse_if_plan_off(app: &mut AppView) -> bool {
+    if app.no_plan {
+        app.show_toast("Plan mode is off");
+    }
+    app.no_plan
 }
 
 /// Format the `Plan mode` toast.
@@ -699,6 +713,8 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
     // The cycle is then the legacy Normal, Plan, Always-Approve ring, so Auto is never reachable from it
     // Resolved once at startup into `app.auto_mode_gate`
     let auto_gate = app.auto_mode_gate;
+    // `--no-plan`: the cycle skips Plan, so Normal goes straight to the permission modes
+    let plan_gate = !app.no_plan;
     let Some(agent) = app.agents.get_mut(&id) else {
         return vec![];
     };
@@ -724,15 +740,15 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         let in_yolo = agent.session.is_yolo();
         let persist_canonical: Option<&'static str> = match (in_plan, in_auto, in_yolo) {
             // Normal to Plan
-            (false, false, false) => {
+            (false, false, false) if plan_gate => {
                 agent.plan_mode_pending = Some(true);
                 agent.deferred_session_mode = Some(xai_grok_tools::types::SessionMode::Plan);
                 agent.show_mode_switch_banner("Plan");
                 tracing::info!("Mode cycle (pre-session): Normal → Plan");
                 None
             }
-            // Plan to Auto (or Plan to Always-Approve when the auto feature is gated off, matching the legacy Normal, Plan, Always-Approve cycle)
-            (true, false, false) => {
+            // Plan (or Normal under `--no-plan`) to Auto, or to Always-Approve when the auto feature is gated off, matching the legacy Normal, Plan, Always-Approve cycle
+            (_, false, false) => {
                 agent.plan_mode_pending = Some(false);
                 agent.deferred_session_mode = None;
                 if auto_gate {
@@ -845,7 +861,7 @@ fn dispatch_cycle_mode_inner(app: &mut AppView) -> Vec<Effect> {
         return effects;
     };
 
-    let choices = mode_choices(agent, auto_gate);
+    let choices = mode_choices(agent, auto_gate, plan_gate);
     let mode = agent.effective_session_mode();
     let in_yolo = agent.session.is_yolo();
     let permission = if in_yolo {
@@ -903,6 +919,7 @@ enum ModeChoice {
 fn mode_choices(
     agent: &crate::app::agent_view::AgentView,
     auto_gate: bool,
+    plan_gate: bool,
 ) -> Vec<(ModeChoice, String)> {
     let mut choices = published_mode_choices(agent);
     if choices.is_empty() {
@@ -910,6 +927,10 @@ fn mode_choices(
             (ModeChoice::Session(SessionMode::Default), "Normal".into()),
             (ModeChoice::Session(SessionMode::Plan), "Plan".into()),
         ];
+    }
+    if !plan_gate {
+        choices
+            .retain(|(choice, _)| !matches!(choice, ModeChoice::Session(mode) if mode.is_plan()));
     }
     if auto_gate {
         choices.push((ModeChoice::Auto, "Auto-review".into()));

@@ -508,6 +508,8 @@ impl SessionActor {
     }
 
     pub(super) async fn enqueue_v2_turn_capture(self: &Arc<Self>, source_prompt_index: usize) {
+        #[cfg(not(feature = "memory"))]
+        return;
         if !self.v2_capture_enabled() {
             return;
         }
@@ -598,6 +600,8 @@ impl SessionActor {
     }
 
     pub(super) async fn resume_v2_capture(self: &Arc<Self>) {
+        #[cfg(not(feature = "memory"))]
+        return;
         if self.memory.can_expose_v2() {
             // Startup promotion opens and migrates the state database, so it
             // runs as a tracked task instead of on the actor's startup path.

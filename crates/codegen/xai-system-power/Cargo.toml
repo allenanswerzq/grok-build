@@ -7,8 +7,13 @@ description = "Cross-platform system sleep/wake (suspend) notifications — used
 
 [dependencies]
 
+[features]
+default = ["dbus"]
+# Linux sleep and wake notifications from logind; without it, Linux reports no power events.
+dbus = ["dep:zbus"]
+
 [target.'cfg(target_os = "linux")'.dependencies]
-zbus = { workspace = true }
+zbus = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-sys = { version = "0.59", features = [

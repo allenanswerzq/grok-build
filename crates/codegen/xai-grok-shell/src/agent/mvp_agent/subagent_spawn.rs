@@ -13,6 +13,12 @@ impl MvpAgent {
     /// Takes the event receiver and the concurrency limits off private state and passes them to `spawn_subagent_coordinator`.
     /// `LocalRef` lets the `!Send` runner touch `self`.
     pub(super) fn start_subagent_coordinator(&self) {
+        #[cfg(not(feature = "subagents"))]
+        {
+            // Dropping the receiver makes stray spawn requests fail fast.
+            self.subagent_event_rx.borrow_mut().take();
+            return;
+        }
         let Some(rx) = self.subagent_event_rx.borrow_mut().take() else {
             return;
         };

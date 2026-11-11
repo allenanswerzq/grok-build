@@ -13,7 +13,7 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 xai-grok-agent = { path = "../xai-grok-agent" }
 xai-grok-sampling-types = { path = "../xai-grok-sampling-types" }
-xai-grok-tools = { path = "../xai-grok-tools" }
+xai-grok-tools = { workspace = true }
 xai-tool-types.workspace = true
 
 [features]

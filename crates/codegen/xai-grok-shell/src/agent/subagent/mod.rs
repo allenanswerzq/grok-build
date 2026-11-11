@@ -2539,6 +2539,7 @@ fn completed_finish_from_inspection(
 /// A `running` meta becomes `cancelled`, unless the coordinator still holds its terminal result, which is then re-emitted. Runs after replay so the finish orders after the spawn. Pre-existing recovery entry point: args are independent handles/sources from two call sites, not one groupable object
 #[allow(clippy::too_many_arguments)]
 #[tracing::instrument(skip_all)]
+#[cfg_attr(not(feature = "subagents"), allow(unused_assignments))]
 pub(crate) async fn reconcile_orphaned_subagents_with_backend(
     unfinished: &[crate::session::storage::UnfinishedSubagent],
     backend: &xai_grok_tools::implementations::grok_build::task::backend::ChannelBackend,
@@ -2549,6 +2550,8 @@ pub(crate) async fn reconcile_orphaned_subagents_with_backend(
     orphan_reason: &str,
     heal_lock: Arc<tokio::sync::Mutex<()>>,
 ) {
+    #[cfg(not(feature = "subagents"))]
+    return;
     let _heal_guard = heal_lock.lock().await;
     let backend = backend.scoped_to_session(parent_session_id);
     let subagents_dir = session_dir.join("subagents");

@@ -67,6 +67,13 @@ fn registered_public_toolset_preset_names() -> Vec<String> {
         .map(|(name, _)| name.clone())
         .collect()
 }
+/// Desktop guidance appended to the standard GrokBuild system prompt for `grok-lean`.
+const GROK_LEAN_PROMPT_BODY: &str = "\
+## Desktop
+
+You work on the user's Linux desktop. Use screen_read to see the windows on screen, and \
+screen_draw to point at things or explain them visually. Keep answers short.
+";
 /// Orchestrator-specific prompt body appended to the standard GrokBuild system prompt (`prompt.md`).
 /// Instructs the GBL model to delegate coding and exploration work to subagents.
 const ORCHESTRATOR_PROMPT_BODY: &str = "\
@@ -286,6 +293,23 @@ fn grok_build_core_toolset_with(
     }
     ToolServerConfig {
         tools,
+        behavior_preset: None,
+    }
+}
+/// The `grok-lean` base toolset. Session features still add their tools, such as `write`.
+fn grok_lean_toolset() -> ToolServerConfig {
+    ToolServerConfig {
+        tools: vec![
+            bash_tool_config(),
+            task_output_tool_config(),
+            kill_task_tool_config(),
+            (&grok_build::ReadFileTool).into(),
+            (&grok_build::SearchReplaceTool).into(),
+            (&grok_build::ListDirTool).into(),
+            (&grok_build::GrepTool).into(),
+            (&grok_build::ScreenReadTool).into(),
+            (&grok_build::ScreenDrawTool).into(),
+        ],
         behavior_preset: None,
     }
 }
@@ -667,6 +691,8 @@ pub enum BuiltinAgentName {
     BrowserUse,
     #[strum(serialize = "grok-build-orchestrator")]
     GrokBuildOrchestrator,
+    /// The `grok-lean` binary's agent: screen tools plus shell and file basics.
+    GrokLean,
 }
 /// Resolves via `BuiltinAgentName` and delegates to [`AgentDefinition::is_strict_harness`].
 /// Unknown names return `false`: never enforce a harness we can't verify.
@@ -692,6 +718,7 @@ impl BuiltinAgentName {
             Self::Plan => AgentDefinition::plan(),
             Self::BrowserUse => AgentDefinition::browser_use(),
             Self::GrokBuildOrchestrator => AgentDefinition::grok_build_orchestrator(),
+            Self::GrokLean => AgentDefinition::grok_lean(),
         }
     }
     /// Built-in agents available as subagents via the Task tool.
@@ -1504,6 +1531,21 @@ impl AgentDefinition {
             )
         }
     }
+    /// A desktop agent with a small toolset and no skills, subagents, or MCP inheritance.
+    pub fn grok_lean() -> Self {
+        Self {
+            tool_config: grok_lean_toolset(),
+            disallowed_tools: vec!["enter_plan_mode".into(), "exit_plan_mode".into()],
+            discover_skills: false,
+            inherit_skills: false,
+            mcp_inheritance: McpInheritance::None,
+            prompt_body: Some(GROK_LEAN_PROMPT_BODY.to_string()),
+            ..Self::base(
+                BuiltinAgentName::GrokLean,
+                "Lean desktop agent with screen, shell, and file tools.",
+            )
+        }
+    }
     pub fn codex() -> Self {
         Self {
             tool_config: codex_toolset(),
@@ -1710,7 +1752,8 @@ mod tests {
                 | BuiltinAgentName::Explore
                 | BuiltinAgentName::Plan
                 | BuiltinAgentName::BrowserUse
-                | BuiltinAgentName::GrokBuildOrchestrator => false,
+                | BuiltinAgentName::GrokBuildOrchestrator
+                | BuiltinAgentName::GrokLean => false,
             };
             assert_eq!(
                 contains_feedback(&builtin.definition().tool_config),
@@ -1864,7 +1907,8 @@ mod tests {
             | BuiltinAgentName::Explore
             | BuiltinAgentName::Plan
             | BuiltinAgentName::Opencode
-            | BuiltinAgentName::BrowserUse => false,
+            | BuiltinAgentName::BrowserUse
+            | BuiltinAgentName::GrokLean => false,
         }
     }
     /// Invariant: structural `is_strict_harness()` must match the hand-classified expectation for every built-in variant.
@@ -2547,6 +2591,7 @@ description: Test default tool config
             ("explore", BuiltinAgentName::Explore),
             ("plan", BuiltinAgentName::Plan),
             ("browser-use", BuiltinAgentName::BrowserUse),
+            ("grok-lean", BuiltinAgentName::GrokLean),
         ] {
             let parsed = BuiltinAgentName::from_str(s).unwrap();
             assert_eq!(parsed, expected, "from_str failed for: {s}");

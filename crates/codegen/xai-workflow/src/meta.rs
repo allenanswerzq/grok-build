@@ -46,13 +46,21 @@ pub enum MetaError {
     TooManyPhases { max: usize, actual: usize },
 }
 
+#[cfg(feature = "engine")]
 const META_PROBE_MAX_OPS: u64 = 100_000;
 
 pub fn extract_meta(script: &str) -> Result<WorkflowMeta, MetaError> {
     if !first_statement_is_meta(script) {
         return Err(MetaError::MetaNotFirst);
     }
+    let meta = eval_meta(script)?;
+    validate_meta(&meta)?;
+    Ok(meta)
+}
 
+/// Runs the script just far enough to read its `meta` map.
+#[cfg(feature = "engine")]
+fn eval_meta(script: &str) -> Result<WorkflowMeta, MetaError> {
     let mut engine = rhai::Engine::new();
     engine.set_max_operations(META_PROBE_MAX_OPS);
     engine.set_max_expr_depths(128, 64);
@@ -72,11 +80,12 @@ pub fn extract_meta(script: &str) -> Result<WorkflowMeta, MetaError> {
         .get_value::<rhai::Map>("meta")
         .ok_or(MetaError::MetaNotFirst)?;
 
-    let meta: WorkflowMeta = rhai::serde::from_dynamic(&meta_dyn.into())
-        .map_err(|e| MetaError::InvalidShape(e.to_string()))?;
+    rhai::serde::from_dynamic(&meta_dyn.into()).map_err(|e| MetaError::InvalidShape(e.to_string()))
+}
 
-    validate_meta(&meta)?;
-    Ok(meta)
+#[cfg(not(feature = "engine"))]
+fn eval_meta(_script: &str) -> Result<WorkflowMeta, MetaError> {
+    Err(MetaError::Parse(crate::ENGINE_UNAVAILABLE.to_string()))
 }
 
 fn validate_meta(meta: &WorkflowMeta) -> Result<(), MetaError> {

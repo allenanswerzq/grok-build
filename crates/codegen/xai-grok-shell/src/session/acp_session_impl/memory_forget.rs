@@ -17,6 +17,11 @@ impl SessionActor {
         path: &str,
         expected_content_hash: &str,
     ) -> MemoryForgetResponse {
+        #[cfg(not(feature = "memory"))]
+        return rejected(
+            MemoryForgetRejection::MemoryDisabled,
+            "Memory is not built into this binary.",
+        );
         let Some(storage) = self.memory.storage() else {
             return rejected(
                 MemoryForgetRejection::MemoryDisabled,

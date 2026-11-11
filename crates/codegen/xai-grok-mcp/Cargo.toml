@@ -6,6 +6,13 @@ edition.workspace = true
 description = "MCP integration crate. Quarantines rmcp + reqwest 0.13 (rmcp 3.x requires reqwest >= 0.13.2 while the rest of the workspace uses reqwest 0.12) and owns the MCP credential store and OAuth flow orchestrator."
 authors = ["xAI"]
 
+[features]
+default = ["connect"]
+default-bazel = ["connect"]
+# Start, connect to, and authenticate MCP servers. Without it, every server fails to start with a
+# clear error, so the rmcp transports, the OAuth flow, and reqwest 0.13 are never linked.
+connect = []
+
 [dependencies]
 rmcp = { version = "3.4", features = [
     "auth",

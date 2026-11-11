@@ -7,8 +7,14 @@ description = "Image validation and transcoding shared by Grok tools and clients
 
 [dependencies]
 crc32fast = { workspace = true }
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 thiserror = { workspace = true }
+
+[features]
+default = ["extra-formats"]
+# Decode GIF, WebP, BMP, TIFF, and ICO as well as PNG and JPEG. Features unify, so this sets the
+# formats for every crate in the build.
+extra-formats = ["image/gif", "image/webp", "image/bmp", "image/tiff", "image/ico"]
 
 [dev-dependencies]
 xai-test-utils = { workspace = true }

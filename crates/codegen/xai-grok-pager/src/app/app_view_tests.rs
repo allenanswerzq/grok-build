@@ -122,6 +122,7 @@ pub(crate) fn test_app() -> AppView {
         screen_mode_switch_hint: None,
         require_plan_approval: false,
         plan_mode: false,
+        no_plan: false,
         subagents: false,
         ask_user: false,
         chat_mode: false,

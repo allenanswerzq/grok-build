@@ -4950,6 +4950,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b40ca9252762c466af32d0b1002e91e4e1bc5398f77455e55474deb466355ff5"
 
 [[package]]
+name = "grok-lean"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde_json",
+ "tikv-jemalloc-sys",
+ "tikv-jemallocator",
+ "tokio",
+ "xai-crash-handler",
+ "xai-grok-extra-ca",
+ "xai-grok-pager",
+ "xai-grok-pager-minimal",
+ "xai-grok-sandbox",
+ "xai-grok-shell",
+ "xai-grok-workspace",
+ "xai-tty-utils",
+]
+
+[[package]]
 name = "group"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -14799,12 +14818,14 @@ dependencies = [
  "xai-grok-foreign-sessions",
  "xai-grok-gboom",
  "xai-grok-hooks",
+ "xai-grok-image",
  "xai-grok-login",
  "xai-grok-markdown",
  "xai-grok-mermaid",
  "xai-grok-otel",
  "xai-grok-pager-diff",
  "xai-grok-pager-render",
+ "xai-grok-permission-rules",
  "xai-grok-plugin-marketplace",
  "xai-grok-sampling-types",
  "xai-grok-sandbox",
@@ -14822,6 +14843,7 @@ dependencies = [
  "xai-prompt-queue",
  "xai-ratatui-inline",
  "xai-ratatui-textarea",
+ "xai-system-power",
  "xai-token-estimation",
  "xai-tool-types",
  "xai-tty-utils",
@@ -15231,7 +15253,6 @@ dependencies = [
  "fs2",
  "futures",
  "futures-util",
- "gcloud-storage",
  "gethostname",
  "git2",
  "glob",
@@ -15308,6 +15329,7 @@ dependencies = [
  "xai-grok-foreign-sessions",
  "xai-grok-hooks",
  "xai-grok-http",
+ "xai-grok-image",
  "xai-grok-login",
  "xai-grok-mcp",
  "xai-grok-memory",
@@ -15797,6 +15819,7 @@ dependencies = [
  "xai-grok-env",
  "xai-grok-extra-ca",
  "xai-grok-hooks",
+ "xai-grok-image",
  "xai-grok-lifecycle",
  "xai-grok-mcp",
  "xai-grok-paths",

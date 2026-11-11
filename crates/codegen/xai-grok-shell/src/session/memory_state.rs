@@ -28,6 +28,11 @@ where
 pub(crate) async fn initialize_memory_storage(
     storage: crate::session::memory::MemoryStorage,
 ) -> Result<(), MemoryInitializationError> {
+    #[cfg(not(feature = "memory"))]
+    return Err(MemoryInitializationError::Storage(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "Memory is not built into this binary.",
+    )));
     if storage.mode().is_legacy() {
         return storage
             .ensure_initialized()

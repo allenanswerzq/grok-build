@@ -847,6 +847,8 @@ pub struct AppView {
     /// Enable plan mode for new sessions (`--plan`).
     /// Adds `enter_plan_mode`, `exit_plan_mode` tools; implies `ask_user`.
     pub plan_mode: bool,
+    /// `--no-plan`: hides `/plan`, drops Plan from Shift+Tab, and refuses plan actions.
+    pub no_plan: bool,
     /// Enable subagent spawning for new sessions (`--subagents`).
     /// Adds the `TaskTool` for spawning subagents.
     pub subagents: bool,
@@ -1473,6 +1475,7 @@ impl AppView {
             screen_mode_switch_hint: None,
             require_plan_approval: false,
             plan_mode: false,
+            no_plan: false,
             subagents: false,
             ask_user: false,
             chat_mode: false,
@@ -1652,17 +1655,34 @@ impl AppView {
             dashboard.set_voice_visible(enabled);
         }
     }
-    /// Sync the auto permission-mode feature gate into every slash surface.
+    /// Sync the auto and plan mode gates into every slash surface.
     /// `/auto` is hard-hidden when `self.auto_mode_gate` is off; otherwise both `/always-approve` and `/auto` stay offered as true toggles.
+    /// `/plan` and `/view-plan` are hidden under `--no-plan`.
     /// Call after gate flips, startup, reconnect, and session create/switch (so new agents inherit the gate).
     pub fn sync_permission_mode_slash_gate(&mut self) {
         let available = self.auto_mode_gate;
+        let plan = !self.no_plan;
         for agent in self.agents.values_mut() {
             agent.prompt.set_auto_mode_available(available);
+            agent
+                .prompt
+                .slash_controller
+                .registry_mut()
+                .set_plan_mode_available(plan);
         }
         self.welcome_prompt.set_auto_mode_available(available);
+        self.welcome_prompt
+            .slash_controller
+            .registry_mut()
+            .set_plan_mode_available(plan);
         if let Some(dashboard) = self.dashboard.as_mut() {
             dashboard.set_auto_mode_available(available);
+            for prompt in [&mut dashboard.dispatch, &mut dashboard.peek_reply] {
+                prompt
+                    .slash_controller
+                    .registry_mut()
+                    .set_plan_mode_available(plan);
+            }
         }
     }
     /// Recompute the tier-restricted slash commands from the current auth state.

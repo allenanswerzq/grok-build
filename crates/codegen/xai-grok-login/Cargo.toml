@@ -51,7 +51,7 @@ url = { workspace = true }
 urlencoding = { workspace = true }
 uuid = { workspace = true, features = ["v4", "v7"] }
 webbrowser = { workspace = true }
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { workspace = true }
 xai-grok-auth = { workspace = true, features = ["middleware"] }
 xai-grok-config = { workspace = true }
 xai-grok-config-types = { workspace = true }

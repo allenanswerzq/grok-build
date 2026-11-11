@@ -246,14 +246,16 @@ impl WebFetchClient {
         tools: RecoveryTools<'_>,
     ) -> ProcessedText {
         let raw_content = String::from_utf8_lossy(body);
-        let content = if is_html(content_type) {
+        // Without `html-to-markdown`, HTML passes through as-is and the converter is never linked.
+        let convert = cfg!(feature = "html-to-markdown") && is_html(content_type);
+        let content = if convert {
             html_to_markdown(&self.converter, &raw_content)
         } else {
             raw_content.into_owned()
         };
         let content = strip_base64_data_uris(content);
         let bytes = content.len();
-        let output_content_type = if is_html(content_type) {
+        let output_content_type = if convert {
             "markdown".to_string()
         } else {
             content_type.to_owned()

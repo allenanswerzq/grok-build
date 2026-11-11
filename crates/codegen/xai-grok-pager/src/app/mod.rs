@@ -838,6 +838,7 @@ pub async fn run(
             }
         }
     }
+    #[cfg(feature = "leader")]
     if let Some(reason) = policy_disable_reason {
         tokio::spawn(xai_grok_shell::leader::kill_stale_reachable_leaders(reason));
     }

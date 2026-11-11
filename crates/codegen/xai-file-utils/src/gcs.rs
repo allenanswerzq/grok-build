@@ -95,6 +95,7 @@ pub async fn upload_bytes<C: StorageConfig>(
     content_type: &str,
 ) -> anyhow::Result<String> {
     match config.upload_method() {
+        #[cfg(feature = "direct-upload")]
         UploadMethod::Direct {
             service_account_key,
         } => {
@@ -148,6 +149,9 @@ pub async fn upload_bytes<C: StorageConfig>(
             )
             .await
         }
+        #[cfg(not(feature = "direct-upload"))]
+        _ => anyhow::bail!("Direct GCS and S3 uploads are not built into this binary"),
+        #[cfg(feature = "direct-upload")]
         UploadMethod::S3 {
             bucket,
             region,
@@ -273,6 +277,7 @@ pub async fn upload_file<C: StorageConfig>(
     content_type: &str,
 ) -> anyhow::Result<String> {
     match config.upload_method() {
+        #[cfg(feature = "direct-upload")]
         UploadMethod::Direct {
             service_account_key,
         } => {
@@ -317,6 +322,9 @@ pub async fn upload_file<C: StorageConfig>(
             )
             .await
         }
+        #[cfg(not(feature = "direct-upload"))]
+        _ => anyhow::bail!("Direct GCS and S3 uploads are not built into this binary"),
+        #[cfg(feature = "direct-upload")]
         UploadMethod::S3 {
             bucket,
             region,
@@ -351,6 +359,7 @@ where
     R: tokio::io::AsyncRead + Send + Sync + 'static,
 {
     match config.upload_method() {
+        #[cfg(feature = "direct-upload")]
         UploadMethod::Direct {
             service_account_key,
         } => {
@@ -396,6 +405,9 @@ where
                 .with_context(|| format!("Streaming upload failed for {}", object_path))?;
             Ok(format!("gs://{}/{}", response.bucket, response.path))
         }
+        #[cfg(not(feature = "direct-upload"))]
+        _ => anyhow::bail!("Direct GCS and S3 uploads are not built into this binary"),
+        #[cfg(feature = "direct-upload")]
         UploadMethod::S3 {
             bucket,
             region,
@@ -419,6 +431,7 @@ where
 }
 
 /// Stream an async reader directly to GCS via the gcloud-storage client.
+#[cfg(feature = "direct-upload")]
 async fn upload_stream_direct<R: tokio::io::AsyncRead + Send + Sync + 'static>(
     bucket: &str,
     object_path: &str,
@@ -510,6 +523,7 @@ async fn upload_file_via_proxy(
 }
 
 /// Build a GCS client with optional service account key, or default ADC.
+#[cfg(feature = "direct-upload")]
 async fn build_gcs_client(
     service_account_key: Option<&str>,
 ) -> anyhow::Result<gcloud_storage::client::Client> {
@@ -535,6 +549,7 @@ async fn build_gcs_client(
 }
 
 /// Upload a file directly to GCS by streaming from disk.
+#[cfg(feature = "direct-upload")]
 async fn upload_file_direct(
     bucket: &str,
     object_path: &str,
@@ -571,6 +586,7 @@ async fn upload_file_direct(
 }
 
 /// Uploads bytes directly to GCS using the gcloud-storage client.
+#[cfg(feature = "direct-upload")]
 async fn upload_bytes_direct(
     bucket: &str,
     object_path: &str,

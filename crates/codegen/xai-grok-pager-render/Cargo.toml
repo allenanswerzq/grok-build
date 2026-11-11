@@ -44,7 +44,7 @@ documented = { workspace = true }
 vte = { workspace = true }
 
 # System appearance detection (dark/light mode)
-dark-light = "2"
+dark-light = { version = "2", optional = true }
 
 # Utilities
 strum = { workspace = true }
@@ -81,7 +81,7 @@ base64 = { workspace = true }
 blake3 = { workspace = true }
 
 # Image decoding/resizing for clipboard image validation before send
-image = { workspace = true, features = ["png", "jpeg", "tiff", "gif", "webp"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 
 # ID generation
 uuid = { workspace = true, features = ["v4"] }
@@ -125,4 +125,10 @@ test-support = []
 # helpers in the CI default set keeps them present for the pager test while
 # leaving cargo's `default` (and thus cargo production builds) without them.
 # The helpers are inert unless their mock setters are called.
-default-bazel = ["test-support"]
+default-bazel = ["test-support", "desktop-appearance"]
+default = ["desktop-appearance"]
+# Ask the desktop (XDG portal, macOS, Windows) for dark or light mode before the terminal fallbacks.
+desktop-appearance = ["dep:dark-light"]
+
+[lints]
+workspace = true

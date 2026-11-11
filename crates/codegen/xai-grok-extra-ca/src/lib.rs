@@ -19,8 +19,9 @@ pub const ENV_GROK_EXTRA_CA_BUNDLE: &str = "GROK_EXTRA_CA_BUNDLE";
 
 pub const ENV_SSL_CERT_FILE: &str = "SSL_CERT_FILE";
 
-/// ring on Windows ARM64: aws-lc-sys's jitterentropy is miscompiled for that target and overflows the stack on the first TLS handshake (xai-org/plugin-marketplace#426).
-const IS_RING_TARGET: bool = cfg!(all(windows, target_arch = "aarch64"));
+/// ring without the `aws-lc` feature, and on Windows ARM64: aws-lc-sys's jitterentropy is miscompiled for that target and overflows the stack on the first TLS handshake (xai-org/plugin-marketplace#426).
+const IS_RING_TARGET: bool =
+    !cfg!(feature = "aws-lc") || cfg!(all(windows, target_arch = "aarch64"));
 
 /// Installs aws-lc-rs, or ring where `IS_RING_TARGET`.
 /// First install wins; without a default, `ClientConfig::builder()` panics when `ring` and `aws-lc-rs` are both compiled in.

@@ -2023,6 +2023,7 @@ impl acp::Agent for MvpAgent {
             "x.ai/session/search" => {
                 crate::extensions::session_search::handle(self, &args).await
             }
+            #[cfg(feature = "worktrees")]
             "x.ai/session/resolve_local_for_worktree_resume"
             | "x.ai/session/rehydrate" => {
                 let ops = self.resolve_workspace_ops()?;
@@ -2057,11 +2058,14 @@ impl acp::Agent for MvpAgent {
                 )
             }
             "x.ai/interject" => crate::extensions::interject::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/feedback" | "x.ai/feedback/dismiss" | "x.ai/feedback/drafts/list"
             | "x.ai/feedback/drafts/get" | "x.ai/feedback/drafts/delete"
             | "x.ai/feedback/drafts/update" | "x.ai/feedback/upload-trace"
             | "x.ai/btw" => crate::extensions::feedback::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/recap" => crate::extensions::recap::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/cloud/terminate" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
@@ -2094,6 +2098,7 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
+            #[cfg(feature = "services")]
             "x.ai/cloud/env/list" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
@@ -2119,6 +2124,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
+            #[cfg(feature = "services")]
             "x.ai/cloud/env/create" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
@@ -2176,6 +2182,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
+            #[cfg(feature = "services")]
             "x.ai/cloud/env/update" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
@@ -2236,6 +2243,7 @@ impl acp::Agent for MvpAgent {
                 }),
                 )
             }
+            #[cfg(feature = "services")]
             "x.ai/cloud/env/delete" => {
                 crate::extensions::auth_gate::require_xai_auth(
                     &self.auth_manager,
@@ -2263,24 +2271,32 @@ impl acp::Agent for MvpAgent {
                     })?;
                 crate::extensions::to_raw_response(&serde_json::json!({ "ok": true }))
             }
+            #[cfg(feature = "services")]
             "x.ai/billing" => crate::extensions::billing::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/auto-topup-rule" => {
                 crate::extensions::billing::handle(self, &args).await
             }
+            #[cfg(feature = "services")]
             "x.ai/share_session" => crate::extensions::share::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/privacy/setCodingDataRetention" => {
                 crate::extensions::privacy::handle(self, &args).await
             }
+            #[cfg(feature = "services")]
             "x.ai/consent/record" => {
                 crate::extensions::consent::handle(self, &args).await
             }
+            #[cfg(feature = "services")]
             "x.ai/rollout/survey" => {
                 crate::extensions::rollout::handle(self, &args).await
             }
             "x.ai/prompt_history" => {
                 crate::extensions::prompt_history::handle(self, &args).await
             }
+            #[cfg(feature = "services")]
             "x.ai/suggest" => crate::extensions::suggest::handle(self, &args).await,
+            #[cfg(feature = "services")]
             "x.ai/suggestPrompt" => crate::extensions::suggest::handle(self, &args).await,
             s if s.starts_with("x.ai/auth/") => {
                 crate::extensions::auth::handle(self, &args).await
@@ -2288,6 +2304,7 @@ impl acp::Agent for MvpAgent {
             s if s.starts_with("x.ai/session_summaries/") => {
                 crate::agent::handlers::session::handle(self, &args).await
             }
+            #[cfg(feature = "worktrees")]
             s if s.starts_with("x.ai/git/worktree/") => {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::worktree::handle(self, &ops, &args).await
@@ -2299,12 +2316,15 @@ impl acp::Agent for MvpAgent {
             s if s.starts_with("x.ai/compact_conversation") => {
                 crate::extensions::memory::handle(self, &args).await
             }
+            #[cfg(feature = "plugins")]
             s if s.starts_with("x.ai/plugins/") => {
                 crate::extensions::plugins::handle(self, &args).await
             }
+            #[cfg(feature = "plugins")]
             s if s.starts_with("x.ai/marketplace/") => {
                 crate::extensions::marketplace::handle(self, &args).await
             }
+            #[cfg(feature = "plugins")]
             s if s.starts_with("x.ai/hooks/") => {
                 crate::extensions::hooks::handle(self, &args).await
             }
@@ -2312,6 +2332,7 @@ impl acp::Agent for MvpAgent {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::hunk_tracker::handle(self, &ops, &args).await
             }
+            #[cfg(feature = "services")]
             s if s.starts_with("x.ai/pr/") => {
                 crate::extensions::pr::handle(self, &args).await
             }
@@ -2336,6 +2357,7 @@ impl acp::Agent for MvpAgent {
             s if s.starts_with("x.ai/search/") => {
                 crate::extensions::search::handle(self, &args).await
             }
+            #[cfg(feature = "services")]
             s if s.starts_with("x.ai/bundle/") => {
                 crate::extensions::bundle::handle(self, &args).await
             }
@@ -2343,6 +2365,7 @@ impl acp::Agent for MvpAgent {
                 let ops = self.resolve_workspace_ops()?;
                 crate::extensions::code_nav::handle(self, &ops, &args).await
             }
+            #[cfg(feature = "plugins")]
             s if s.starts_with("x.ai/skills/") || s == "x.ai/workflows/list" => {
                 let compat = self.cfg.borrow().compat_resolved;
                 let cwd = crate::extensions::skills::request_cwd(&args);
@@ -2355,6 +2378,7 @@ impl acp::Agent for MvpAgent {
                     )
                     .await
             }
+            #[cfg(feature = "services")]
             s if s.starts_with("x.ai/review") => {
                 crate::extensions::feedback::handle(self, &args).await
             }

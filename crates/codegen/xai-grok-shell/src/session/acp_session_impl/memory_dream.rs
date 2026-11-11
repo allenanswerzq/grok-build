@@ -118,6 +118,8 @@ impl SessionActor {
         log_suffix: &str,
         timer: &xai_grok_telemetry::session_end::SharedSessionEndTimer,
     ) {
+        #[cfg(not(feature = "memory"))]
+        return;
         let span = session_end::span(Phase::Memory);
         if self.startup_hints.is_subagent {
             tracing::debug!(
@@ -201,6 +203,8 @@ impl SessionActor {
 
     /// Run dream consolidation if gates pass.
     pub(super) async fn maybe_run_dream(&self) {
+        #[cfg(not(feature = "memory"))]
+        return;
         if self.startup_hints.is_subagent {
             tracing::debug!(
                 target: xai_grok_telemetry::memory_log::TARGET,
@@ -543,6 +547,8 @@ impl SessionActor {
         trigger: &str,
         snapshot: Option<MemoryFlushSnapshot>,
     ) -> bool {
+        #[cfg(not(feature = "memory"))]
+        return false;
         use xai_grok_memory::flush::*;
 
         if !self.memory.uses_legacy_pipeline() {
@@ -847,6 +853,8 @@ impl SessionActor {
         raw_text: &str,
         context_summary: &str,
     ) -> Result<String, String> {
+        #[cfg(not(feature = "memory"))]
+        return Err("Memory is not built into this binary.".to_owned());
         // Upper-bound check to prevent unbounded LLM input.
         const MAX_INPUT_BYTES: usize = 32 * 1024;
         let combined_len = raw_text.len() + context_summary.len();

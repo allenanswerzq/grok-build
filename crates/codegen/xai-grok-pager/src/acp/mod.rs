@@ -285,6 +285,8 @@ pub async fn connect_via_leader(
     flags: ConnectFlags,
     raw_config: &toml::Value,
 ) -> Result<AcpConnection> {
+    #[cfg(not(feature = "leader"))]
+    anyhow::bail!("leader mode is not built into this binary");
     use xai_grok_shell::leader::{
         ClientCapabilities, ClientMode, LeaderReconnector, ReconnectPolicy, connect_or_spawn,
     };

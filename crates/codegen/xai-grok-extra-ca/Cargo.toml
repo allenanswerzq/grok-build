@@ -5,6 +5,13 @@ version = "0.1.0"
 edition.workspace = true
 description = "TLS policy for the grok CLI: rustls backend pin, process crypto provider, shared root store, and opt-in GROK_EXTRA_CA_BUNDLE roots"
 
+[features]
+default = ["aws-lc"]
+default-bazel = ["aws-lc"]
+# Install aws-lc-rs as the process crypto provider. Without it, ring is installed and aws-lc is
+# never linked: about 2 MB smaller, but no ECDSA P-521 certificates or post-quantum key exchange.
+aws-lc = []
+
 [dependencies]
 base64 = { workspace = true }
 # Not reqwest 0.13: blocking TLS overflows on Windows arm64 (#237643).

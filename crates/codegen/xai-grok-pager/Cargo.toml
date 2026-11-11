@@ -15,7 +15,7 @@ xai-grok-version = { workspace = true }
 xai-prompt-queue = { workspace = true }
 
 # Presentation-primitives layer (extracted)
-xai-grok-pager-render = { path = "../xai-grok-pager-render" }
+xai-grok-pager-render = { path = "../xai-grok-pager-render", default-features = false }
 
 # The /gboom easter-egg game (extracted)
 xai-grok-gboom = { path = "../xai-grok-gboom" }
@@ -98,7 +98,7 @@ xai-grok-update = { path = "../xai-grok-update", default-features = false }
 agent-client-protocol = { workspace = true }
 xai-acp-lib = { workspace = true }
 xai-chat-state = { path = "../xai-chat-state", optional = true }
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { workspace = true }
 # Crash-recovery registry of open TUI sessions.
 xai-grok-active-sessions = { workspace = true }
 xai-grok-config = { workspace = true }
@@ -114,6 +114,11 @@ xai-grok-dashboard-store = { workspace = true }
 # (cpal is target-gated to non-Linux inside xai-grok-voice).
 xai-grok-voice = { path = "../xai-grok-voice", default-features = false, features = ["audio"] }
 xai-grok-login = { workspace = true }
+# Only so the default feature set can turn on their optional backends.
+xai-grok-extra-ca = { workspace = true }
+xai-grok-image = { workspace = true }
+xai-grok-permission-rules = { workspace = true }
+xai-system-power = { workspace = true }
 xai-grok-cloud-config = { workspace = true }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
 # The status-line contract: the config the user writes and the payload the
@@ -145,7 +150,7 @@ xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 base64 = { workspace = true }
 
 # Image decoding/resizing for clipboard image validation before send
-image = { workspace = true, features = ["png", "jpeg", "tiff", "gif", "webp"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 
 # ID generation
 uuid = { workspace = true, features = ["v4", "v7"] }
@@ -246,12 +251,25 @@ workspace = true
 [features]
 default = [
     "jemalloc",
+    "leader",
     "sandbox-enforce",
     "xai-grok-shell/default",
     "xai-grok-update/default",
+    "xai-file-utils/direct-upload",
+    "xai-grok-extra-ca/aws-lc",
+    "xai-grok-image/extra-formats",
+    "xai-grok-pager-render/desktop-appearance",
+    "xai-grok-permission-rules/bash-grammar",
+    "xai-grok-telemetry/export",
+    "xai-grok-tools/compression",
+    "xai-grok-tools/html-to-markdown",
+    "xai-grok-tools/lsp",
+    "xai-grok-tools/pdf",
+    "xai-system-power/dbus",
 ]
 default-bazel = [
     "jemalloc",
+    "leader",
     "sandbox-enforce",
     "test-support",
     "local-workspace",
@@ -264,6 +282,8 @@ local-workspace = ["xai-grok-shell/local-workspace"]
 # here too and the generated `crate_features` stay valid.
 jemalloc = []
 sandbox-enforce = ["xai-grok-sandbox/enforce"]
+# Connect through a shared leader process instead of an embedded agent.
+leader = []
 release-dist = []
 # Exposes test-only view-model constructors/setters (e.g. `test_agent_view`,
 # `AgentSession::set_yolo_mode_for_test`) to sibling crates' test builds — used

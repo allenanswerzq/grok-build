@@ -1,0 +1,34 @@
+# Cargo config for the smallest grok-lean binary, used with the `lean` profile and a nightly
+# toolchain that has `rust-src`, because it rebuilds std:
+#   RUSTUP_TOOLCHAIN=nightly-2026-10-04 cargo build -p grok-lean --profile lean \
+#     --config crates/codegen/grok-lean/lean.toml
+# The binary lands in target/x86_64-unknown-linux-gnu/lean/. An explicit target keeps these flags
+# off build scripts and proc macros, which must stay position independent.
+
+[build]
+target = "x86_64-unknown-linux-gnu"
+
+# std is rebuilt with the binary's flags. Without this, the prebuilt std brings back its unwind
+# tables under fat LTO. Size-tuned algorithms; no backtrace symbolizer, since the binary aborts
+# on panic and keeps no unwind tables to walk.
+[unstable]
+build-std = ["std", "panic_abort"]
+build-std-features = ["optimize_for_size"]
+
+# Appended to the workspace flags, so these win over its `force-unwind-tables=yes`:
+# - no unwind tables: panics abort, so nothing unwinds;
+# - panic messages keep their text but drop file, line, and column;
+# - a non-PIE executable, which needs no load-time relocations;
+# - the linker merges identical functions whose addresses are never compared.
+[target.x86_64-unknown-linux-gnu]
+rustflags = [
+    "-C", "force-unwind-tables=no",
+    "-Z", "location-detail=none",
+    "-C", "relocation-model=static",
+    "-C", "link-arg=-Wl,--icf=safe",
+]
+
+# Bundled C and C++ code (aws-lc, SQLite, zstd, jemalloc) without unwind tables either.
+[env]
+CFLAGS_x86_64_unknown_linux_gnu = "-fno-asynchronous-unwind-tables -fno-unwind-tables"
+CXXFLAGS_x86_64_unknown_linux_gnu = "-fno-asynchronous-unwind-tables -fno-unwind-tables"

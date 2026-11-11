@@ -376,6 +376,18 @@ impl CommandRegistry {
         self.rebuild_triggers();
     }
 
+    /// Show or hide `/plan` and `/view-plan`. `--no-plan` hides both (neither offered nor executable).
+    pub fn set_plan_mode_available(&mut self, available: bool) {
+        for name in ["plan", "view-plan"] {
+            if available {
+                self.hidden.remove(name);
+            } else {
+                self.hidden.insert(name.to_string());
+            }
+        }
+        self.rebuild_triggers();
+    }
+
     /// Test-only: put `name` in (or out of) the menu-only hide set so unit tests can cover [`Self::get`] vs [`Self::get_for_dispatch`].
     #[cfg(test)]
     pub(crate) fn set_menu_hidden_for_test(&mut self, name: &str, hidden: bool) {

@@ -7,8 +7,11 @@ description = "Telemetry engine: product events + Mixpanel emission + Sentry err
 authors = ["xAI"]
 
 [features]
-default = []
-default-bazel = []
+default = ["export"]
+default-bazel = ["export"]
+# Export product events (Mixpanel funnel), OTEL traces, and the external OTEL stream. Without it,
+# events are dropped where they are emitted and no exporter is built, so that code is never linked.
+export = []
 memory-log = []
 
 [dependencies]
@@ -55,7 +58,7 @@ xai-grok-session-events = { workspace = true }
 # `session_metrics::TraceUploadReason::from_upload_method` matches on the shared
 # `UploadMethod` enum (small, dependency-light types crate) so the reason->wire
 # mapping lives next to the trace-upload lifecycle events it labels.
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { workspace = true }
 xai-tty-utils = { workspace = true }
 xai-grok-version = { workspace = true }
 whoami = { workspace = true }

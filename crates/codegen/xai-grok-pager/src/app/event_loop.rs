@@ -1114,6 +1114,7 @@ pub(crate) async fn run(
     }
     app.require_plan_approval = xai_grok_shell::util::config::load_require_plan_approval();
     app.plan_mode = !args.no_plan;
+    app.no_plan = args.no_plan;
     app.subagents = !args.no_subagents;
     app.ask_user = !args.no_ask_user;
     app.chat_mode = args.chat();

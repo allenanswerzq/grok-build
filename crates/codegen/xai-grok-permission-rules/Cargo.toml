@@ -5,6 +5,12 @@ version = "0.1.0"
 edition.workspace = true
 description = "Grok's permission rule engine, apart from the session and tool code that uses it"
 
+[features]
+default = ["bash-grammar"]
+# Parse shell commands for permission rules; without it, every command takes the unparseable path,
+# so rules that need a parse ask instead of allowing.
+bash-grammar = ["dep:tree-sitter-bash"]
+
 [dependencies]
 agent-client-protocol = { workspace = true }
 dunce = { workspace = true }
@@ -18,7 +24,7 @@ tempfile = { workspace = true }
 toml = { workspace = true, features = ["preserve_order"] }
 tracing = { workspace = true }
 tree-sitter = { workspace = true }
-tree-sitter-bash = "0.25"
+tree-sitter-bash = { version = "0.25", optional = true }
 url = { workspace = true }
 xai-dirs = { workspace = true }
 xai-grok-config = { workspace = true }

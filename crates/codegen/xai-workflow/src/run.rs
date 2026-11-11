@@ -1,4 +1,22 @@
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc;
+use tokio_util::sync::CancellationToken;
+
+use crate::host::WorkflowHostRequest;
+use crate::journal::Journal;
+
+pub struct WorkflowRunParams {
+    pub script: String,
+    pub args: serde_json::Value,
+    pub journal: Journal,
+    pub host_tx: mpsc::UnboundedSender<WorkflowHostRequest>,
+    pub cancel: CancellationToken,
+    pub max_ops: u64,
+}
+
+impl WorkflowRunParams {
+    pub const DEFAULT_MAX_OPS: u64 = 100_000_000;
+}
 
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, strum::AsRefStr, strum::IntoStaticStr,

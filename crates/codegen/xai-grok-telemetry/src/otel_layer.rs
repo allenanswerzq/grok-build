@@ -13,19 +13,22 @@ pub fn build_otel_layer<S>(
 where
     S: tracing::Subscriber + for<'span> LookupSpan<'span>,
 {
-    let mode = match crate::instrumentation::current_mode() {
-        crate::instrumentation::InstrumentationMode::Server => {
-            xai_grok_otel::provider::OtelProviderMode::Server
-        }
-        _ => xai_grok_otel::provider::OtelProviderMode::Local,
-    };
-    xai_grok_otel::provider::build_otel_layer(
-        client,
-        config,
-        mode,
-        Arc::new(crate::client::is_session_metrics_enabled),
-        Arc::new(redact::redact_batch),
-    )
+    // Without `export` the layer is `None`, which records nothing.
+    cfg!(feature = "export").then(|| {
+        let mode = match crate::instrumentation::current_mode() {
+            crate::instrumentation::InstrumentationMode::Server => {
+                xai_grok_otel::provider::OtelProviderMode::Server
+            }
+            _ => xai_grok_otel::provider::OtelProviderMode::Local,
+        };
+        xai_grok_otel::provider::build_otel_layer(
+            client,
+            config,
+            mode,
+            Arc::new(crate::client::is_session_metrics_enabled),
+            Arc::new(redact::redact_batch),
+        )
+    })
 }
 
 pub fn shutdown_otel() {

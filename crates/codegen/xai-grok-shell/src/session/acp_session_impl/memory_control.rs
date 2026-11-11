@@ -51,6 +51,11 @@ pub(crate) async fn initialize_v2_memory(
     storage: &MemoryStorage,
     carry_over_legacy: bool,
 ) -> Result<MemoryV2AccessResource, V2MemoryInitFailure> {
+    #[cfg(not(feature = "memory"))]
+    return Err(V2MemoryInitFailure {
+        stage: "build",
+        error: "Memory is not built into this binary.".to_owned(),
+    });
     crate::session::memory_state::initialize_memory_storage(storage.clone())
         .await
         .map_err(|error| V2MemoryInitFailure {
@@ -201,6 +206,8 @@ impl SessionActor {
 
     /// Turn memory on or off for this session and return the message for the user.
     pub(crate) async fn memory_toggle(self: &Arc<Self>, enabled: bool) -> String {
+        #[cfg(not(feature = "memory"))]
+        return "Memory is not built into this binary.".to_owned();
         tracing::info!(
             session_id = %self.session_info.id.0,
             enabled,
@@ -453,6 +460,8 @@ impl SessionActor {
     ///
     /// `state` is held only around the synchronous agent swap, never across an await.
     pub(super) async fn sync_v2_memory_prompt(&self) -> MemoryPromptSync {
+        #[cfg(not(feature = "memory"))]
+        return MemoryPromptSync::Applied;
         let access = self.rebuild_spec.memory_v2_access.get();
         let rendered = match self.render_memory_prompt(access.as_ref()).await {
             MemoryPromptRender::Rendered(rendered) => rendered,
@@ -534,6 +543,12 @@ impl SessionActor {
 
     /// `x.ai/memory/flush`: capture every finished or stopped turn now and wait for it to land.
     pub(crate) async fn memory_flush_command(self: &Arc<Self>) -> MemoryFlushResponse {
+        #[cfg(not(feature = "memory"))]
+        return MemoryFlushResponse {
+            flushed: false,
+            disposition: MemoryFlushDisposition::Disabled,
+            through_turn: None,
+        };
         use crate::session::memory::v2_capture::FlushResult;
         if !self.memory.is_enabled() {
             return MemoryFlushResponse {
@@ -573,6 +588,8 @@ impl SessionActor {
 
     /// `x.ai/memory/dream`: consolidate now, bypassing the automatic Dream gates.
     pub(crate) async fn memory_dream_command(self: &Arc<Self>) -> MemoryDreamResponse {
+        #[cfg(not(feature = "memory"))]
+        return MemoryDreamResponse::new(MemoryDreamDisposition::Disabled);
         if !self.memory.is_enabled() {
             return MemoryDreamResponse::new(MemoryDreamDisposition::Disabled);
         }

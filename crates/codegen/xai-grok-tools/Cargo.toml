@@ -36,9 +36,9 @@ xai-grok-image = { workspace = true }
 ignore = { workspace = true }
 infer = { workspace = true }
 globset = { workspace = true }
-image = { workspace = true, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff", "ico"] }
+image = { workspace = true, features = ["png", "jpeg"] }
 kamadak-exif = { workspace = true, optional = true }
-pdf_oxide = { workspace = true }
+pdf_oxide = { workspace = true, optional = true }
 # PPTX text extraction (implementations/read_file/pptx.rs). Deliberately NOT
 # `workspace = true`: the workspace `zip` pin has default features on, which
 # drag aes/bzip2/lzma/zstd into the shipped pager binary. PPTX entries are
@@ -50,7 +50,7 @@ minijinja = { version = "2", features = ["custom_syntax"] }
 parking_lot = { workspace = true }
 htmd = { workspace = true }
 scraper = { workspace = true }
-reqwest = { workspace = true, features = ["rustls-tls", "json", "gzip", "brotli", "deflate"] }
+reqwest = { workspace = true, features = ["rustls-tls", "json"] }
 pulldown-cmark = { workspace = true }
 regex = { workspace = true }
 schemars = { workspace = true }
@@ -94,7 +94,7 @@ which = { workspace = true }
 chrono = { workspace = true }
 futures-util = { workspace = true }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
-xai-file-utils = { path = "../xai-file-utils" }
+xai-file-utils = { workspace = true }
 xai-grok-otel = { workspace = true }
 dhat = { workspace = true, optional = true }
 zstd = { workspace = true }
@@ -119,6 +119,8 @@ wgpu = { version = "30", default-features = false, features = ["std", "parking_l
 windows = { workspace = true, features = ["Win32_Storage_FileSystem"] }
 
 [dev-dependencies]
+# Tests cover the extra image formats.
+xai-grok-image = { workspace = true, features = ["extra-formats"] }
 pretty_assertions = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 tracing-subscriber = { workspace = true, features = ["fmt"] }
@@ -137,8 +139,17 @@ zstd = { workspace = true }
 workspace = true
 
 [features]
-default-bazel = ["serde"]
-default = ["serde"]
+default-bazel = ["serde", "pdf", "lsp", "html-to-markdown", "compression"]
+default = ["serde", "pdf", "lsp", "html-to-markdown", "compression"]
 serde = []
+# Ask web fetch servers for gzip, brotli, or deflate bodies. Without it, pages arrive uncompressed.
+compression = ["reqwest/gzip", "reqwest/brotli", "reqwest/deflate"]
+# Convert fetched HTML pages to Markdown. Without it, web fetch returns HTML as-is.
+html-to-markdown = []
+# Run configured language servers. Without it, [`implementations::lsp::start`] starts none, so the
+# LSP client is never linked.
+lsp = []
+# Read PDF text and render PDF pages; without it, reading a PDF reports that PDFs are unsupported.
+pdf = ["dep:pdf_oxide"]
 live-tests = []
 dhat-heap = ["dep:dhat"]

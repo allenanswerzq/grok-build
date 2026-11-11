@@ -1,5 +1,4 @@
-use tree_sitter::{Node, Parser, Tree};
-use tree_sitter_bash::LANGUAGE as BASH;
+use tree_sitter::{Node, Tree};
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct BashCommandHighlights {
@@ -39,13 +38,20 @@ impl PlainCommand {
 }
 
 /// Parse the provided bash source using tree-sitter-bash.
+#[cfg(feature = "bash-grammar")]
 pub fn try_parse_shell(src: &str) -> Option<Tree> {
-    let lang = BASH.into();
-    let mut parser = Parser::new();
+    let lang = tree_sitter_bash::LANGUAGE.into();
+    let mut parser = tree_sitter::Parser::new();
     #[expect(clippy::expect_used)]
     parser.set_language(&lang).expect("load bash grammar");
     let old_tree: Option<&Tree> = None;
     parser.parse(src, old_tree)
+}
+
+/// Without the `bash-grammar` feature nothing parses; callers fail closed.
+#[cfg(not(feature = "bash-grammar"))]
+pub fn try_parse_shell(_src: &str) -> Option<Tree> {
+    None
 }
 
 /// Parse a script of plain word-only commands joined only by `&&`, `||`, `;`, `|`.

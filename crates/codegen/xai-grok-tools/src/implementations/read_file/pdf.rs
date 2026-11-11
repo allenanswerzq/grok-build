@@ -2,16 +2,21 @@
 
 use std::fmt::Write as _;
 
-use base64::Engine as _;
-use base64::engine::general_purpose;
+#[cfg(feature = "pdf")]
+use base64::{Engine as _, engine::general_purpose};
 
-use crate::types::output::{FileContent, PdfPageImage, PdfPageImages, ReadFileOutput};
+#[cfg(feature = "pdf")]
+use crate::types::output::{PdfPageImage, PdfPageImages};
+use crate::types::output::{FileContent, ReadFileOutput};
 
 use super::metadata::{bytes_to_metadata, is_pdf_magic};
 
 pub const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+#[cfg(feature = "pdf")]
 const PDF_AUTO_READ_THRESHOLD: usize = 10;
+#[cfg(feature = "pdf")]
 const PDF_RENDER_DPI: u32 = 150;
+#[cfg(feature = "pdf")]
 const PDF_RENDER_JPEG_QUALITY: u8 = 85;
 pub const PDF_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
 
@@ -175,6 +180,7 @@ pub fn parse_page_range(spec: &str, page_count: usize) -> Result<Vec<usize>, Str
     Ok(pages)
 }
 
+#[cfg(feature = "pdf")]
 fn open_pdf_document(bytes: Vec<u8>) -> Result<(pdf_oxide::PdfDocument, usize), String> {
     let doc = pdf_oxide::PdfDocument::from_bytes(bytes)
         .map_err(|e| format!("Failed to open PDF: {e}"))?;
@@ -190,6 +196,7 @@ fn open_pdf_document(bytes: Vec<u8>) -> Result<(pdf_oxide::PdfDocument, usize), 
     Ok((doc, page_count))
 }
 
+#[cfg(feature = "pdf")]
 fn open_pdf_and_resolve_pages(
     bytes: Vec<u8>,
     pages_spec: Option<&str>,
@@ -214,6 +221,7 @@ fn open_pdf_and_resolve_pages(
     Ok((doc, page_count, page_indices))
 }
 
+#[cfg(feature = "pdf")]
 pub(crate) fn render_pdf_pages(
     bytes: Vec<u8>,
     pages_spec: Option<&str>,
@@ -266,11 +274,13 @@ pub fn raw_text_to_file_content(text: String) -> ReadFileOutput {
     })
 }
 
+#[cfg_attr(not(feature = "pdf"), allow(dead_code))]
 enum PageTextStyle {
     GrokBuild,
     Cursor { total_pages: usize },
 }
 
+#[cfg(feature = "pdf")]
 fn append_page_body(text: &mut String, doc: &pdf_oxide::PdfDocument, page_idx: usize) {
     match doc.extract_text(page_idx) {
         Ok(page_text) => text.push_str(&page_text),
@@ -285,6 +295,7 @@ fn append_page_body(text: &mut String, doc: &pdf_oxide::PdfDocument, page_idx: u
     }
 }
 
+#[cfg(feature = "pdf")]
 fn extract_page_texts(
     doc: &pdf_oxide::PdfDocument,
     page_indices: &[usize],
@@ -313,6 +324,7 @@ fn extract_page_texts(
     Ok(text)
 }
 
+#[cfg(feature = "pdf")]
 fn extract_pdf_plain_text(bytes: Vec<u8>, style: PageTextStyle) -> Result<String, String> {
     let (doc, page_count) = open_pdf_document(bytes)?;
     let page_indices: Vec<usize> = (0..page_count).collect();
@@ -326,7 +338,7 @@ fn extract_pdf_plain_text(bytes: Vec<u8>, style: PageTextStyle) -> Result<String
 }
 
 /// Extract plain text from all PDF pages (no auto-read page limit).
-#[cfg(test)]
+#[cfg(all(test, feature = "pdf"))]
 pub(crate) fn extract_pdf_plain_text_all(bytes: Vec<u8>) -> Result<String, String> {
     extract_pdf_plain_text(bytes, PageTextStyle::GrokBuild)
 }
@@ -336,6 +348,7 @@ pub fn extract_pdf_plain_text_cursor(bytes: Vec<u8>) -> Result<String, String> {
     extract_pdf_plain_text(bytes, PageTextStyle::Cursor { total_pages: 0 })
 }
 
+#[cfg(feature = "pdf")]
 pub(crate) fn extract_pdf_text(
     bytes: Vec<u8>,
     pages_spec: Option<&str>,
@@ -343,6 +356,32 @@ pub(crate) fn extract_pdf_text(
     let (doc, _page_count, page_indices) = open_pdf_and_resolve_pages(bytes, pages_spec)?;
     let text = extract_page_texts(&doc, &page_indices, PageTextStyle::GrokBuild)?;
     Ok(raw_text_to_file_content(text))
+}
+
+/// Error for every PDF read in builds without the `pdf` feature.
+#[cfg(not(feature = "pdf"))]
+const PDF_UNSUPPORTED: &str = "Reading PDF files is not supported in this build.";
+
+#[cfg(not(feature = "pdf"))]
+pub(crate) fn render_pdf_pages(
+    _bytes: Vec<u8>,
+    _pages_spec: Option<&str>,
+    _file_size: usize,
+) -> Result<ReadFileOutput, String> {
+    Err(PDF_UNSUPPORTED.to_string())
+}
+
+#[cfg(not(feature = "pdf"))]
+fn extract_pdf_plain_text(_bytes: Vec<u8>, _style: PageTextStyle) -> Result<String, String> {
+    Err(PDF_UNSUPPORTED.to_string())
+}
+
+#[cfg(not(feature = "pdf"))]
+pub(crate) fn extract_pdf_text(
+    _bytes: Vec<u8>,
+    _pages_spec: Option<&str>,
+) -> Result<ReadFileOutput, String> {
+    Err(PDF_UNSUPPORTED.to_string())
 }
 
 /// Three-tier PDF detection: infer metadata, magic bytes, or extension.
@@ -427,7 +466,7 @@ pub fn make_test_pdf(page_texts: &[&str]) -> Vec<u8> {
     pdf
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "pdf"))]
 mod tests {
     use super::*;
 

@@ -17,6 +17,11 @@ default:
 build package=cli *flags:
     cargo build -p "$1" --locked -j {{ jobs }} "${@:2}"
 
+# Build the smallest grok-lean binary (nightly; rebuilds std, takes 15-20 minutes).
+build-lean *flags:
+    rustup run nightly-2026-10-04 cargo build -p grok-lean --locked -j {{ jobs }} --profile lean --config crates/codegen/grok-lean/lean.toml "$@"
+    @ls -lh target/x86_64-unknown-linux-gnu/lean/grok-lean
+
 # Build the CLI and launch the TUI with any TUI arguments.
 run *args: build
     ./target/debug/xai-grok-pager "$@"

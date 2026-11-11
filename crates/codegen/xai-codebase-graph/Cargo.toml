@@ -6,7 +6,15 @@ edition.workspace = true
 description = "High-performance code graph generation using tree-sitter queries"
 
 [features]
-default = []
+default = ["grammars"]
+# Parse Rust, TypeScript, JavaScript, Go, and Python; without it, no file is indexed.
+grammars = [
+    "dep:tree-sitter-go",
+    "dep:tree-sitter-javascript",
+    "dep:tree-sitter-python",
+    "dep:tree-sitter-rust",
+    "dep:tree-sitter-typescript",
+]
 
 [[bin]]
 name = "code-graph"
@@ -58,11 +66,11 @@ dashmap = { workspace = true }
 strum = { workspace = true }
 # Parsing, keeping it here to avoid pollution
 tree-sitter = { workspace = true }
-tree-sitter-rust = "0.24.0"
-tree-sitter-typescript = "0.23.2"
-tree-sitter-python = "0.25.0"
-tree-sitter-go = "0.25.0"
-tree-sitter-javascript = "0.25.0"
+tree-sitter-rust = { version = "0.24.0", optional = true }
+tree-sitter-typescript = { version = "0.23.2", optional = true }
+tree-sitter-python = { version = "0.25.0", optional = true }
+tree-sitter-go = { version = "0.25.0", optional = true }
+tree-sitter-javascript = { version = "0.25.0", optional = true }
 
 # Unix process checking for lock staleness detection
 [target.'cfg(unix)'.dependencies]

@@ -13,12 +13,13 @@
 //!
 //! This is the single home for the policy. Every production multi-thread
 //! runtime (the `grok` binary, `workspace_server`) derives its worker count
-//! from here.
+//! from here. A binary that runs few threads, such as `grok-lean`, can choose
+//! a smaller pool with [`set_blocking_pool`] before it builds any runtime.
 
 use std::io;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Maximum runtime worker threads for any grok process.
@@ -36,6 +37,42 @@ pub const BLOCKING_THREAD_KEEP_ALIVE: Duration = Duration::MAX;
 
 const PREWARM_THREAD_WAIT: Duration = Duration::from_secs(5);
 
+/// Blocking-pool settings for every runtime this module builds.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BlockingPool {
+    /// Most blocking threads one runtime may run.
+    pub max_threads: usize,
+    /// How long an idle blocking thread waits for work before it exits.
+    pub keep_alive: Duration,
+    /// Threads [`build_with_blocking_pool`] starts up front.
+    pub prewarm: usize,
+}
+
+impl BlockingPool {
+    /// 16 threads, kept forever, all started up front.
+    pub const DEFAULT: Self = Self {
+        max_threads: MAX_BLOCKING_THREADS,
+        keep_alive: BLOCKING_THREAD_KEEP_ALIVE,
+        prewarm: MAX_BLOCKING_THREADS,
+    };
+}
+
+static BLOCKING_POOL: OnceLock<BlockingPool> = OnceLock::new();
+
+/// Sets the blocking pool for every runtime built after this call. Returns `false` if it was
+/// already set.
+pub fn set_blocking_pool(pool: BlockingPool) -> bool {
+    BLOCKING_POOL.set(pool).is_ok()
+}
+
+/// The pool [`set_blocking_pool`] chose, or [`BlockingPool::DEFAULT`].
+pub fn blocking_pool() -> BlockingPool {
+    BLOCKING_POOL
+        .get()
+        .copied()
+        .unwrap_or(BlockingPool::DEFAULT)
+}
+
 /// Pure, testable: `min(cores, MAX_WORKER_THREADS)`.
 pub fn cap_worker_threads(cores: NonZeroUsize) -> NonZeroUsize {
     cores.min(MAX_WORKER_THREADS)
@@ -46,11 +83,12 @@ pub fn capped_worker_threads() -> NonZeroUsize {
     cap_worker_threads(std::thread::available_parallelism().unwrap_or(NonZeroUsize::MIN))
 }
 
-/// Cap the blocking pool and keep idle workers for the process lifetime.
+/// Cap the blocking pool and set how long idle workers live, from [`blocking_pool`].
 pub fn apply_blocking_pool(builder: &mut tokio::runtime::Builder) -> &mut tokio::runtime::Builder {
+    let pool = blocking_pool();
     builder
-        .max_blocking_threads(MAX_BLOCKING_THREADS)
-        .thread_keep_alive(BLOCKING_THREAD_KEEP_ALIVE)
+        .max_blocking_threads(pool.max_threads)
+        .thread_keep_alive(pool.keep_alive)
 }
 
 /// Apply the blocking-pool policy, build, and pre-warm the full pool. Process-lifetime runtimes only. Per-session
@@ -64,9 +102,9 @@ pub fn build_with_blocking_pool(
     Ok(rt)
 }
 
-/// Create [`MAX_BLOCKING_THREADS`] overlapping blocking workers.
+/// Create [`BlockingPool::prewarm`] overlapping blocking workers.
 pub fn prewarm_blocking_pool(handle: &tokio::runtime::Handle) -> io::Result<()> {
-    prewarm_blocking_pool_n(handle, MAX_BLOCKING_THREADS, PREWARM_THREAD_WAIT)
+    prewarm_blocking_pool_n(handle, blocking_pool().prewarm, PREWARM_THREAD_WAIT)
 }
 
 /// Create `n` overlapping blocking workers, waiting at most `wait` in total. Timed out before `n` workers started.

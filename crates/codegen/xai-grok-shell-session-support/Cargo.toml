@@ -12,7 +12,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["sync", "rt", "time", "macros"] }
 tracing = { workspace = true }
-xai-file-utils = { path = "../xai-file-utils", optional = true }
+xai-file-utils = { workspace = true, optional = true }
 xai-grok-http = { workspace = true }
 xai-grok-version = { workspace = true }
 

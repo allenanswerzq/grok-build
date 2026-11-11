@@ -70,11 +70,12 @@ impl HttpClient {
                 .redirect(reqwest::redirect::Policy::none())
                 .pool_max_idle_per_host(2)
                 .pool_idle_timeout(std::time::Duration::from_secs(30))
-                .tcp_nodelay(true)
-                // Reduce size of incoming payloads.
-                .gzip(true)
-                .brotli(true)
-                .deflate(true);
+                .tcp_nodelay(true);
+            // Reduce size of incoming payloads.
+            #[cfg(feature = "compression")]
+            {
+                builder = builder.gzip(true).brotli(true).deflate(true);
+            }
             if let Some(proxy) = proxy.clone() {
                 builder = builder.proxy(proxy);
             }

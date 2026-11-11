@@ -53,6 +53,8 @@ pub mod mcp_http_client;
 pub mod oauth;
 pub mod oauth_config;
 pub mod owned_clients;
+// Without the connect feature, cfg-gated returns leave the rest of each MCP entry point unreachable.
+#[cfg_attr(not(feature = "connect"), allow(unreachable_code, unused_variables))]
 pub mod servers;
 pub mod shared_mcp_state;
 mod tool_name;

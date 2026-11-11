@@ -6,7 +6,7 @@ edition.workspace = true
 description = "Rhai-scripted dynamic workflow engine: scripts orchestrate agents through a host channel"
 
 [dependencies]
-rhai = { workspace = true }
+rhai = { workspace = true, optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
@@ -22,6 +22,12 @@ libc = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+
+[features]
+default = ["engine"]
+default-bazel = ["engine"]
+# Run and validate workflow scripts; without it, every workflow fails with "not built in".
+engine = ["dep:rhai"]
 
 [lints]
 workspace = true

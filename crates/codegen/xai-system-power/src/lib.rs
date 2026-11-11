@@ -97,11 +97,16 @@ mod imp;
 #[path = "windows.rs"]
 mod imp;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", feature = "dbus"))]
 #[path = "linux.rs"]
 mod imp;
 
-#[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+/// No power events: other platforms, and Linux builds without the `dbus` feature.
+#[cfg(not(any(
+    target_os = "macos",
+    target_os = "windows",
+    all(target_os = "linux", feature = "dbus")
+)))]
 mod imp {
     use super::PowerCallback;
 

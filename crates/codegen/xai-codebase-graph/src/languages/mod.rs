@@ -1,7 +1,12 @@
+#[cfg(feature = "grammars")]
 mod golang;
+#[cfg(feature = "grammars")]
 mod javascript;
+#[cfg(feature = "grammars")]
 mod python;
+#[cfg(feature = "grammars")]
 mod rust;
+#[cfg(feature = "grammars")]
 mod ts;
 pub mod types;
 
@@ -10,10 +15,15 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
+#[cfg(feature = "grammars")]
 pub use golang::golang;
+#[cfg(feature = "grammars")]
 pub use javascript::js_lang;
+#[cfg(feature = "grammars")]
 pub use python::python_lang;
+#[cfg(feature = "grammars")]
 pub use rust::rust_lang;
+#[cfg(feature = "grammars")]
 pub use ts::ts_lang;
 pub use types::TSLanguageConfig;
 
@@ -29,8 +39,9 @@ pub struct LanguageRegistry {
 }
 
 impl LanguageRegistry {
-    /// Create a new language registry with all supported languages.
+    /// Create a new language registry with all supported languages; empty without the `grammars` feature.
     pub fn new() -> Self {
+        #[cfg(feature = "grammars")]
         let configs: Vec<Arc<TSLanguageConfig>> = vec![
             Arc::new(rust_lang()),
             Arc::new(ts_lang()),
@@ -38,6 +49,8 @@ impl LanguageRegistry {
             Arc::new(golang()),
             Arc::new(python_lang()),
         ];
+        #[cfg(not(feature = "grammars"))]
+        let configs: Vec<Arc<TSLanguageConfig>> = Vec::new();
 
         let mut by_extension = HashMap::new();
         let mut by_id = HashMap::new();

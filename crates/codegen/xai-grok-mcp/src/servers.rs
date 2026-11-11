@@ -1268,6 +1268,15 @@ pub enum McpError {
 }
 
 impl McpError {
+    /// Built without the `connect` feature, so no MCP server can start. The guards are `cfg`'d
+    /// `return`s: an `if !cfg!(..)` would keep the rest of an `async fn` in its state machine.
+    #[cfg(not(feature = "connect"))]
+    fn not_built(server: &str) -> Self {
+        Self::ClientError(format!(
+            "MCP server '{server}': MCP support is not built into this binary"
+        ))
+    }
+
     fn timeout(server: &str, duration: std::time::Duration) -> Self {
         Self::Timeout {
             server: server.to_string(),
@@ -3315,6 +3324,8 @@ impl McpClient {
     /// Returns true if valid tokens were found (from another session/process writing to the credential store, or a successful token refresh).
     /// Used by `retry_auth_required_servers` on overlay refresh.
     pub async fn try_reauth_from_disk(&self) -> bool {
+        #[cfg(not(feature = "connect"))]
+        return false;
         let (Some(auth_mgr), Some(config)) = (&self.auth_manager, &self.http_config) else {
             return false;
         };
@@ -3364,6 +3375,8 @@ impl McpClient {
     /// Force token acquisition and reset the transport so the next `ensure_initialized` rebuilds it with the fresh token.
     /// Reload from disk (picks up tokens from background auth task); Refresh via refresh_token grant; Full browser-based OAuth flow, unless the refresh failure was a pure network failure ([`mcp_refresh_failure_is_transient`]). The stored refresh token is then still presumed valid. Opening a browser tab / re-running DCR for a Wi-Fi blip right after wake-from-sleep is both useless and destructive. Useless because the IdP is unreachable for the browser too; destructive because it discards a working credential.
     pub async fn force_reauth(&self, force: bool) -> bool {
+        #[cfg(not(feature = "connect"))]
+        return false;
         let (Some(auth_mgr), Some(config)) = (&self.auth_manager, &self.http_config) else {
             return false;
         };
@@ -3637,6 +3650,8 @@ impl McpClient {
     /// Concurrent callers park on `init_done` instead of issuing a parallel handshake.
     /// If the holder is dropped before publishing, `InitGuard` restores the transport so a later caller can retry; `Drop` uses `try_lock` because it is synchronous.
     pub async fn ensure_initialized(&self) -> Result<McpService, McpError> {
+        #[cfg(not(feature = "connect"))]
+        return Err(McpError::not_built(&self.server_name));
         // Bound how long a parked caller waits on `init_done` before surfacing an error; wedging silently would recreate the exact "stuck client" failure mode
         let inflight_wait =
             std::time::Duration::from_secs(self.handshake_worst_case_secs().saturating_add(1));
@@ -4834,6 +4849,8 @@ pub async fn start_mcp_server(
     byo_config: Option<&McpOAuthConfig>,
     ctx: &McpSpawnCtx<'_>,
 ) -> Result<McpClient, McpError> {
+    #[cfg(not(feature = "connect"))]
+    return Err(McpError::not_built(mcp_server_name(&mcp_server)));
     // No whole-start timer here: `InstrumentationTimer` holds a Chrome-mode span guard that must not cross an await (it is `!Send` and tracing's span stack is per-thread), and this fn awaits on every transport. Durations are carried by the per-transport telemetry events instead.
     match mcp_server {
         acp::McpServer::Stdio(acp::McpServerStdio {

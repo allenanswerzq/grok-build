@@ -560,6 +560,8 @@ impl SessionActor {
     /// Notes the model writes with file tools produce no capture outcome, so
     /// the turn end is the event that lets them count toward the trigger.
     pub(super) fn schedule_v2_dream_check_after_turn(self: &Arc<Self>) {
+        #[cfg(not(feature = "memory"))]
+        return;
         if !self.memory.v2_config.can_run_automatic_dream()
             || self.startup_hints.is_subagent
             || self.memory.storage().is_none()

@@ -496,7 +496,7 @@ pub(in crate::app) fn show_ssh_wrap_tip(app: &mut AppView) {
 }
 
 pub(super) fn dispatch_show_plan_nudge(app: &mut AppView) -> Vec<Effect> {
-    if !app.contextual_hints.plan_mode {
+    if app.no_plan || !app.contextual_hints.plan_mode {
         return vec![];
     }
     let ActiveView::Agent(id) = app.active_view else {
