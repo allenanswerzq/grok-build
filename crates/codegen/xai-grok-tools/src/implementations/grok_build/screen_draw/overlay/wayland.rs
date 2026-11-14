@@ -4,16 +4,26 @@
 //! Wayland events. A request is answered after the compositor presents a frame painted
 //! from it, so the tool returns only once the drawing is on screen.
 //!
-//! Clicks pass through everywhere except scene frames. Dragging a scene with the left button
-//! orbits its camera like a turntable: sideways turns the yaw, and up and down turns the
-//! pitch, which stops straight above or below so the scene never rolls over. Each move
-//! repaints at the compositor's frame rate. Scrolling over a scene zooms it: up zooms in.
+//! An animated drawing paints its next frame each time the compositor presents one, so it
+//! moves at the monitor's frame rate, until a timeline that plays once ends.
+//!
+//! Clicks pass through everywhere except the frames of scenes and 3D charts, both called
+//! scenes here. Dragging a scene with the left button orbits its camera like a turntable:
+//! sideways turns the yaw, and up and down turns the pitch, which stops straight above or
+//! below so the scene never rolls over. Dragging takes the camera over from the scene's own
+//! keys. Each move repaints at the compositor's frame rate. Scrolling over a scene zooms it:
+//! up zooms in.
 
+use std::ffi::c_void;
 use std::io::{BufRead, Read, Write};
-use std::time::Duration;
+use std::ptr::NonNull;
+use std::time::{Duration, Instant};
 
+use super::gpu::Target;
 use super::paint::{Painter, View};
-use crate::implementations::grok_build::screen_draw::{OverlayRequest, Shape};
+use crate::implementations::grok_build::screen_draw::{
+    Camera, OverlayRequest, Shape, animation::seconds,
+};
 use anyhow::{Context, Result, anyhow};
 use serde_json::json;
 use smithay_client_toolkit::{
@@ -27,7 +37,7 @@ use smithay_client_toolkit::{
         client::{
             Connection, Proxy, QueueHandle,
             globals::registry_queue_init,
-            protocol::{wl_output, wl_pointer, wl_seat, wl_shm, wl_surface},
+            protocol::{wl_output, wl_pointer, wl_seat, wl_surface},
         },
         protocols::wp::{
             cursor_shape::v1::client::wp_cursor_shape_device_v1::{
@@ -54,7 +64,6 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
-    shm::{Shm, ShmHandler, slot::SlotPool},
 };
 
 const MAX_REQUEST: u64 = 1024 * 1024;
@@ -77,16 +86,18 @@ pub(super) fn run() -> Result<()> {
     let connection = Connection::connect_to_env().context("Cannot connect to Wayland")?;
     let (globals, mut queue) = registry_queue_init::<Overlay>(&connection)?;
     let qh = queue.handle();
-    let shm = Shm::bind(&globals, &qh)?;
+    // Made before the overlay so that it, and the connection it takes, outlive the overlay's
+    // surfaces: dropping a GPU surface after its display has disconnected crashes.
+    let mut event_loop = EventLoop::<Overlay>::try_new()?;
     let mut overlay = Overlay {
+        display: NonNull::new(connection.backend().display_ptr().cast())
+            .context("Wayland gave no display handle")?,
         registry: RegistryState::new(&globals),
         outputs: OutputState::new(&globals, &qh),
         seats: SeatState::new(&globals, &qh),
         compositor: CompositorState::bind(&globals, &qh)?,
         shell: LayerShell::bind(&globals, &qh)
             .context("The compositor does not support layer-shell overlays")?,
-        pool: SlotPool::new(4, &shm)?,
-        shm,
         fractional: globals.bind(&qh, 1..=1, Ignore).ok(),
         viewporter: globals.bind(&qh, 1..=1, Ignore).ok(),
         cursors: CursorShapeManager::bind(&globals, &qh).ok(),
@@ -98,7 +109,6 @@ pub(super) fn run() -> Result<()> {
     };
     // Learn output names before the first request asks for one.
     queue.roundtrip(&mut overlay)?;
-    let mut event_loop = EventLoop::<Overlay>::try_new()?;
     WaylandSource::new(connection, queue).insert(event_loop.handle())?;
     let (sender, receiver) = channel::sync_channel(4);
     std::thread::Builder::new()
@@ -169,11 +179,20 @@ fn reply(error: Option<&str>) -> Result<()> {
 
 /// The visible drawing: a full-screen overlay layer on one output.
 struct Drawing {
+    /// Dropped first, while its surface still exists.
+    target: Target,
     layer: LayerSurface,
     fractional: Option<wp_fractional_scale_v1::WpFractionalScaleV1>,
     viewport: Option<wp_viewport::WpViewport>,
     output: wl_output::WlOutput,
     request: OverlayRequest,
+    /// The shapes as last painted, at their current point in the timeline.
+    shown: Vec<Shape>,
+    /// When the timeline started, and its length in seconds.
+    start: Instant,
+    seconds: f64,
+    /// The last paint showed the final frame, so nothing moves until something changes.
+    settled: bool,
     /// Each scene's view, which dragging and scrolling change, in scene order; reset by
     /// every request.
     views: Vec<View>,
@@ -193,25 +212,34 @@ struct Drawing {
 }
 
 impl Drawing {
-    /// Scene frames in drawing order, as (x, y, width, height).
-    fn scenes(&self) -> impl Iterator<Item = (f64, f64, f64, f64)> + '_ {
-        self.request.shapes.iter().filter_map(|shape| match *shape {
-            Shape::Scene {
-                x,
-                y,
-                width,
-                height,
-                ..
-            } => Some((x, y, width, height)),
-            _ => None,
-        })
+    /// Show the request from the start of its timeline.
+    fn restart(&mut self) {
+        for shape in &mut self.request.shapes {
+            if let Shape::Chart(chart) = shape {
+                chart.pin_axes();
+            }
+        }
+        let shapes = &self.request.shapes;
+        self.views = views(shapes);
+        self.shown = shapes.clone();
+        self.start = Instant::now();
+        self.seconds = seconds(shapes);
+        self.settled = false;
+        self.drag = None;
+        self.dirty = true;
+        self.unanswered = true;
+    }
+
+    /// Each scene's frame, as (x, y, width, height), and camera, as last painted.
+    fn scenes(&self) -> impl Iterator<Item = ((f64, f64, f64, f64), Camera)> + '_ {
+        self.shown.iter().filter_map(Shape::orbit)
     }
 
     /// The topmost scene under `(x, y)`, by its place among the scenes.
     fn scene_at(&self, (x, y): (f64, f64)) -> Option<usize> {
         self.scenes()
             .enumerate()
-            .filter(|&(_, (left, top, width, height))| {
+            .filter(|&(_, ((left, top, width, height), _))| {
                 (left..=left + width).contains(&x) && (top..=top + height).contains(&y)
             })
             .map(|(index, _)| index)
@@ -225,8 +253,9 @@ impl Drawing {
         let Some((scene, from)) = self.drag else {
             return;
         };
-        if let Some(view) = self.views.get_mut(scene) {
-            let camera = &mut view.camera;
+        let shown = self.scenes().nth(scene).map(|(_, camera)| camera);
+        if let (Some(view), Some(shown)) = (self.views.get_mut(scene), shown) {
+            let camera = view.camera.get_or_insert(shown);
             camera.yaw = (camera.yaw - (to.0 - from.0) * DRAG_DEGREES).rem_euclid(360.0);
             camera.pitch = (camera.pitch + (to.1 - from.1) * DRAG_DEGREES).clamp(-90.0, 90.0);
         }
@@ -249,13 +278,13 @@ impl Drawing {
     }
 }
 
-/// Each scene in `shapes` as drawn: its own camera at the fitted size, in order.
+/// Each scene's view in `shapes` before the user orbits or zooms, in order.
 fn views(shapes: &[Shape]) -> Vec<View> {
     shapes
         .iter()
         .filter_map(|shape| match shape {
-            Shape::Scene { camera, .. } => Some(View::new(*camera)),
-            _ => None,
+            Shape::Scene { objects, .. } => Some(View::new(objects, &shape.times())),
+            _ => shape.orbit().map(|_| View::new(&[], &[])),
         })
         .collect()
 }
@@ -272,13 +301,13 @@ impl Drop for Drawing {
 }
 
 struct Overlay {
+    /// The Wayland connection's display, which outlives every drawing.
+    display: NonNull<c_void>,
     registry: RegistryState,
     outputs: OutputState,
     seats: SeatState,
     compositor: CompositorState,
     shell: LayerShell,
-    shm: Shm,
-    pool: SlotPool,
     fractional: Option<wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1>,
     viewporter: Option<wp_viewporter::WpViewporter>,
     cursors: Option<CursorShapeManager>,
@@ -321,10 +350,7 @@ impl Overlay {
         };
         if let Some(drawing) = self.drawing.as_mut().filter(|d| d.output == output) {
             drawing.request = request;
-            drawing.views = views(&drawing.request.shapes);
-            drawing.drag = None;
-            drawing.dirty = true;
-            drawing.unanswered = true;
+            drawing.restart();
             return catch_scenes(&self.compositor, drawing);
         }
         // The drawing moves to another monitor.
@@ -352,14 +378,26 @@ impl Overlay {
             .outputs
             .info(&output)
             .map_or(1, |info| info.scale_factor);
-        let views = views(&request.shapes);
-        let drawing = Drawing {
+        let window = NonNull::new(layer.wl_surface().id().as_ptr().cast())
+            .context("The overlay surface has no handle")?;
+        // SAFETY: the display outlives every drawing, and a drawing drops its target before
+        // its surface.
+        let target = match unsafe { self.painter.target(self.display, window) } {
+            Ok(target) => target,
+            Err(error) => return reply(Some(&format!("{error:#}"))),
+        };
+        let mut drawing = Drawing {
+            target,
             layer,
             fractional,
             viewport,
             output,
             request,
-            views,
+            shown: Vec::new(),
+            start: Instant::now(),
+            seconds: 0.0,
+            settled: false,
+            views: Vec::new(),
             drag: None,
             size: (0, 0),
             scale: f64::from(scale.max(1)),
@@ -368,6 +406,7 @@ impl Overlay {
             in_flight: false,
             unanswered: true,
         };
+        drawing.restart();
         catch_scenes(&self.compositor, &drawing)?;
         drawing.layer.commit();
         self.drawing = Some(drawing);
@@ -385,57 +424,35 @@ impl Overlay {
     }
 
     fn paint(&mut self, qh: &QueueHandle<Self>) -> Result<()> {
-        let painted = match &self.drawing {
-            Some(d) if d.configured && d.dirty && !d.in_flight => {
-                let request = &d.request;
-                self.painter
-                    .paint(&request.style, &request.shapes, &d.views, d.size, d.scale)
-            }
-            _ => return Ok(()),
-        };
-        let image = match painted {
-            Ok(image) => image,
-            Err(error) => {
-                self.dismiss(&format!("{error:#}"));
-                return Ok(());
-            }
-        };
-        let Some(drawing) = self.drawing.as_mut() else {
+        let Some(d) = (self.drawing.as_mut()).filter(|d| d.configured && d.dirty && !d.in_flight)
+        else {
             return Ok(());
         };
-        let (width, height) = (image.width as i32, image.height as i32);
-        // Prefer the renderer's RGBA byte order; ARGB8888 is the format every compositor
-        // supports.
-        let rgba = cfg!(target_endian = "little")
-            && self.shm.formats().contains(&wl_shm::Format::Abgr8888);
-        let format = if rgba {
-            wl_shm::Format::Abgr8888
-        } else {
-            wl_shm::Format::Argb8888
-        };
-        let (buffer, bytes) = self.pool.create_buffer(width, height, width * 4, format)?;
-        if rgba {
-            bytes.copy_from_slice(&image.data);
-        } else {
-            for (src, dst) in image.data.chunks_exact(4).zip(bytes.chunks_exact_mut(4)) {
-                if let [r, g, b, a] = *src {
-                    dst.copy_from_slice(&u32::from_be_bytes([a, r, g, b]).to_ne_bytes());
-                }
-            }
+        let elapsed = d.start.elapsed().as_secs_f64();
+        let (t, settled) = d.request.repeat.time(elapsed, d.seconds);
+        if d.seconds > 0.0 {
+            let style = &d.request.style;
+            d.shown = d.request.shapes.iter().map(|s| s.at(t, style)).collect();
+            catch_scenes(&self.compositor, d)?;
         }
-        let surface = drawing.layer.wl_surface();
-        if let Some(viewport) = &drawing.viewport {
+        d.settled = settled;
+        // Surface state that the GPU's present commits with the frame.
+        let surface = d.layer.wl_surface();
+        if let Some(viewport) = &d.viewport {
             surface.set_buffer_scale(1);
-            viewport.set_destination(drawing.size.0 as i32, drawing.size.1 as i32);
+            viewport.set_destination(d.size.0 as i32, d.size.1 as i32);
         } else {
-            surface.set_buffer_scale(drawing.scale as i32);
+            surface.set_buffer_scale(d.scale as i32);
         }
-        surface.damage_buffer(0, 0, width, height);
         surface.frame(qh, FrameCallbackData(surface.clone()));
-        buffer.attach_to(surface)?;
-        drawing.layer.commit();
-        drawing.dirty = false;
-        drawing.in_flight = true;
+        let (style, shapes) = (&d.request.style, &d.shown);
+        match (self.painter).paint(&mut d.target, style, shapes, &d.views, d.size, d.scale) {
+            Ok(shown) => {
+                d.dirty = !shown;
+                d.in_flight = shown;
+            }
+            Err(error) => self.dismiss(&format!("{error:#}")),
+        }
         Ok(())
     }
 
@@ -450,7 +467,7 @@ impl Overlay {
 /// and scrolling elsewhere reach the windows below. Applies on the next commit.
 fn catch_scenes(compositor: &CompositorState, drawing: &Drawing) -> Result<()> {
     let region = Region::new(compositor)?;
-    for (x, y, width, height) in drawing.scenes() {
+    for ((x, y, width, height), _) in drawing.scenes() {
         let (left, top) = (x.floor(), y.floor());
         let (right, bottom) = ((x + width).ceil(), (y + height).ceil());
         region.add(
@@ -505,11 +522,15 @@ impl CompositorHandler for Overlay {
         };
         drawing.in_flight = false;
         // A dirty drawing changed after this frame was painted; answer after the next one.
-        if drawing.unanswered && !drawing.dirty {
+        let answer = drawing.unanswered && !drawing.dirty;
+        if answer {
             drawing.unanswered = false;
-            if let Err(error) = reply(None) {
-                self.error = Some(error);
-            }
+        }
+        if !drawing.settled {
+            drawing.dirty = true;
+        }
+        if answer && let Err(error) = reply(None) {
+            self.error = Some(error);
         }
     }
 
@@ -579,12 +600,6 @@ impl LayerShellHandler for Overlay {
         drawing.size = (width, height);
         drawing.configured = true;
         drawing.dirty = true;
-    }
-}
-
-impl ShmHandler for Overlay {
-    fn shm_state(&mut self) -> &mut Shm {
-        &mut self.shm
     }
 }
 

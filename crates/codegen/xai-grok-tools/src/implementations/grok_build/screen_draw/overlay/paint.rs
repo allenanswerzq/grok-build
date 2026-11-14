@@ -1,5 +1,5 @@
-//! Turns a drawing into draw data for the GPU: boxes, lines, labels, text panels, and 3D
-//! scenes, in the desktop's style.
+//! Turns a drawing into draw data for the GPU: boxes, lines, labels, text panels, 3D scenes,
+//! and charts ([`chart`]), in the desktop's style.
 //!
 //! Geometry is in logical units; the screen camera maps it onto output pixels, and 4×
 //! multisampling smooths its edges. Every line gets a thin halo in the theme background, so
@@ -11,23 +11,30 @@
 //! lines become thin rods with a constant width on screen. The GPU tests depth per pixel, so
 //! objects may intersect and still look right.
 //!
-//! The user can orbit a scene's camera and zoom it ([`View`]). The fit comes from the
-//! scene's own camera, so the size holds steady while the user orbits; zoom scales the fitted
-//! image about its middle, and the frame clips whatever ends up outside it.
+//! The user can orbit the camera of a scene or 3D chart and zoom it ([`View`]). The fit comes
+//! from the scene's own camera, so the size holds steady while the user orbits; zoom scales
+//! the fitted image about its middle, and the frame clips whatever ends up outside it.
+//!
+//! An animated scene fits instead around a ball that holds every object at every key, which
+//! looks the same from any side, so the scene holds still in its frame as it moves and turns.
 
 use std::collections::HashMap;
+use std::ffi::c_void;
+use std::ptr::NonNull;
 
-use anyhow::{Result, ensure};
+use anyhow::{Context, Result, ensure};
 use cosmic_text::{
     Attrs, Buffer, CacheKey, Family, FontSystem, Metrics, Shaping, SwashCache, SwashContent,
     SwashImage, Weight, Wrap,
 };
-use glam::{Mat4, Vec2, Vec3, Vec4, vec2};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4, vec2};
 
-use super::gpu::{Frame, Gpu, Image, Pipeline, Rect, Vertex, premultiply};
+mod chart;
+
+use super::gpu::{Frame, Gpu, Image, Pipeline, Rect, Target, Vertex, premultiply};
 use crate::implementations::grok_build::screen_draw::{
-    Arrows, BOX_FILL, Camera, Pattern, Point3, Rgb, SCENE_FILL, SceneObject, Shape, Style,
-    TEXT_FILL,
+    Arrows, BOX_FILL, Camera, Chart, Color, Pattern, Point3, Rgb, SCENE_FILL, SceneObject, Shape,
+    Style, TEXT_FILL,
 };
 
 const MAX_SIDE: u32 = 16_384;
@@ -47,9 +54,8 @@ const CIRCLE_SEGMENTS: usize = 32;
 /// Sharp corners extend at most this many half widths.
 const MITER_LIMIT: f32 = 4.0;
 const ATLAS_WIDTH: u32 = 1024;
-/// Segments around spheres, cylinders, and line rods, and sphere bands from pole to pole.
+/// Segments around spheres, cylinders, and line rods.
 const SOLID_SEGMENTS: usize = 32;
-const SPHERE_BANDS: usize = 16;
 const ROD_SEGMENTS: usize = 8;
 /// Eye distance in scene radii: enough perspective to read as 3D without distortion.
 const EYE_DISTANCE: f32 = 3.5;
@@ -72,19 +78,38 @@ impl Painter {
         }
     }
 
-    /// Paint `shapes` on a transparent image of `size` logical units at `scale` pixels each.
-    /// Scene i is seen through `views[i]`; scenes without one keep their own camera.
+    /// A target that draws on the Wayland surface `window` on `display`.
+    ///
+    /// # Safety
+    /// Both must stay valid until the target is dropped.
+    pub(crate) unsafe fn target(
+        &mut self,
+        display: NonNull<c_void>,
+        window: NonNull<c_void>,
+    ) -> Result<Target> {
+        let gpu = match &mut self.gpu {
+            Some(gpu) => gpu,
+            None => self.gpu.insert(Gpu::new()?),
+        };
+        // SAFETY: the caller's guarantee.
+        unsafe { gpu.target(display, window) }
+    }
+
+    /// Paint `shapes` on `target`, transparent elsewhere, at `size` logical units of `scale`
+    /// pixels each. Scene i is seen through `views[i]`. Returns false when the surface skipped
+    /// the frame.
     ///
     /// # Errors
     /// Fails when the image exceeds the pixel budget or the GPU cannot draw it.
     pub(crate) fn paint(
         &mut self,
+        target: &mut Target,
         style: &Style,
         shapes: &[Shape],
         views: &[View],
         size: (u32, u32),
         scale: f64,
-    ) -> Result<Image> {
+    ) -> Result<bool> {
         let scale = scale as f32;
         let pixels = |side: u32| (side as f32 * scale).ceil() as u32;
         let (width, height) = (pixels(size.0), pixels(size.1));
@@ -104,35 +129,54 @@ impl Painter {
             style,
             views,
             screen: vec2(size.0 as f32, size.1 as f32),
+            alpha: 1.0,
+            clip: None,
         };
         canvas.draw(shapes);
         let mut frame = canvas.frame;
-        if frame.draws.is_empty() {
-            return Ok(Image::transparent(width, height));
-        }
         if canvas.atlas.image.height > 0 {
             frame.atlas = canvas.atlas.image;
         }
-        let gpu = match &mut self.gpu {
-            Some(gpu) => gpu,
-            None => self.gpu.insert(Gpu::new()?),
-        };
-        gpu.render(&frame)
+        let gpu = self.gpu.as_ref().context("The target outlived its GPU")?;
+        gpu.render(&frame, target)
     }
 }
 
-/// How the user is looking at a scene: its camera after orbiting, and a zoom over the
-/// fitted size.
+/// How a scene is seen: the camera the user orbited to, if any, a zoom over the fitted size,
+/// and for an animated scene the ball it fits around.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct View {
-    pub(super) camera: Camera,
+    pub(super) camera: Option<Camera>,
     pub(super) zoom: f32,
+    reach: Option<(Vec3, f32)>,
 }
 
 impl View {
-    /// The scene's own camera at the fitted size.
-    pub(super) fn new(camera: Camera) -> Self {
-        Self { camera, zoom: 1.0 }
+    /// The view of a scene of `objects`, keyed at `times`, before the user orbits or zooms.
+    pub(super) fn new(objects: &[SceneObject], times: &[f64]) -> Self {
+        let reach = (!times.is_empty()).then(|| {
+            let balls: Vec<(Vec3, f32)> = std::iter::once(0.0)
+                .chain(times.iter().copied())
+                .flat_map(|t| objects.iter().map(move |object| ball(&object.at(t))))
+                .collect();
+            let (low, high) = balls.iter().fold(
+                (Vec3::INFINITY, Vec3::NEG_INFINITY),
+                |(low, high), &(center, radius)| {
+                    (low.min(center - radius), high.max(center + radius))
+                },
+            );
+            let center = (low + high) / 2.0;
+            let radius = balls
+                .iter()
+                .map(|&(at, radius)| at.distance(center) + radius)
+                .fold(1e-6, f32::max);
+            (center, radius)
+        });
+        Self {
+            camera: None,
+            zoom: 1.0,
+            reach,
+        }
     }
 }
 
@@ -153,6 +197,10 @@ struct Canvas<'a> {
     views: &'a [View],
     /// Screen size in logical units.
     screen: Vec2,
+    /// The opacity of the shape being drawn.
+    alpha: f32,
+    /// Where 2D drawing shows, when not the whole screen.
+    clip: Option<Rect>,
 }
 
 impl Canvas<'_> {
@@ -163,10 +211,20 @@ impl Canvas<'_> {
         let halo = premultiply(palette.background, HALO_ALPHA);
         let scenes = shapes
             .iter()
-            .filter(|shape| matches!(shape, Shape::Scene { .. }))
+            .filter(|shape| shape.orbit().is_some())
             .count();
         let mut scene_index = 0;
         for shape in shapes {
+            self.alpha = shape.opacity() as f32;
+            // Each scene and 3D chart takes its view and a depth slice, later ones nearer.
+            let orbit = shape.orbit().map(|_| {
+                let index = scene_index;
+                scene_index += 1;
+                let slice = |index: usize| 1.0 - index as f32 / scenes as f32;
+                let view = self.views.get(index).copied();
+                let view = view.unwrap_or_else(|| View::new(&[], &[]));
+                ((slice(index + 1), slice(index)), view)
+            });
             match shape {
                 Shape::Box {
                     x,
@@ -197,6 +255,7 @@ impl Canvas<'_> {
                     line_width,
                     arrows,
                     pattern,
+                    ..
                 } => {
                     let ends = (vec2(*x as f32, *y as f32), vec2(*to_x as f32, *to_y as f32));
                     let width = line_width.unwrap_or(style.line_width * 1.5) as f32;
@@ -223,20 +282,15 @@ impl Canvas<'_> {
                     if *border {
                         self.stroke(&outline, true, line, premultiply(palette.accent, 255));
                     }
-                    // Later scenes take nearer depth slices.
-                    let slice = |index: usize| 1.0 - index as f32 / scenes as f32;
-                    let depth = (slice(scene_index + 1), slice(scene_index));
-                    let view = self
-                        .views
-                        .get(scene_index)
-                        .copied()
-                        .unwrap_or_else(|| View::new(*camera));
-                    scene_index += 1;
-                    self.scene(objects, (*camera, view), frame, depth, line);
+                    if let Some((depth, view)) = orbit {
+                        self.scene(objects, (*camera, view), frame, depth, line);
+                    }
                 }
+                Shape::Chart(chart) => self.chart(chart, orbit),
             }
         }
         for shape in shapes {
+            self.alpha = shape.opacity() as f32;
             match shape {
                 Shape::Box {
                     x,
@@ -259,7 +313,16 @@ impl Canvas<'_> {
                     label: Some(label),
                     line_width,
                     ..
-                } => {
+                }
+                | Shape::Chart(Chart {
+                    x,
+                    y,
+                    width,
+                    height,
+                    label: Some(label),
+                    line_width,
+                    ..
+                }) => {
                     let frame = rect(*x, *y, *width, *height);
                     self.tag(label, frame, palette.accent, line(line_width));
                 }
@@ -271,6 +334,7 @@ impl Canvas<'_> {
                     size,
                     fill,
                     border,
+                    ..
                 } => {
                     let size = size.unwrap_or(style.font_size) as f32;
                     let panel = (opacity(*fill, TEXT_FILL), *border);
@@ -398,9 +462,9 @@ impl Canvas<'_> {
         }
     }
 
-    /// A 3D scene in `frame`, fitted from `camera` and seen through `view`, drawn in its
-    /// `depth` slice so it never mixes with other scenes. Line objects are rods about `line`
-    /// wide on screen.
+    /// A 3D scene in `frame`, fitted from `camera` (or around the view's ball) and seen
+    /// through `view`, drawn in its `depth` slice so it never mixes with other scenes. Line
+    /// objects are rods about `line` wide on screen.
     fn scene(
         &mut self,
         objects: &[SceneObject],
@@ -410,62 +474,20 @@ impl Canvas<'_> {
         line: f32,
     ) {
         let style = self.style;
-        let mut triangles = Vec::new();
-        let mut lines = Vec::new();
-        for object in objects {
-            let color = |name| premultiply(style.palette.rgb(name), 255);
-            match object {
-                SceneObject::Cuboid {
-                    center,
-                    size,
-                    color: name,
-                } => cuboid(&mut triangles, point(center), point(size), color(*name)),
-                SceneObject::Sphere {
-                    center,
-                    radius,
-                    color: name,
-                } => sphere(&mut triangles, point(center), *radius as f32, color(*name)),
-                SceneObject::Cylinder {
-                    from,
-                    to,
-                    radius,
-                    color: name,
-                } => {
-                    let ends = (point(from), point(to));
-                    cylinder(
-                        &mut triangles,
-                        ends,
-                        *radius as f32,
-                        SOLID_SEGMENTS,
-                        color(*name),
-                    );
-                }
-                SceneObject::Line {
-                    from,
-                    to,
-                    color: name,
-                } => lines.push((point(from), point(to), color(*name))),
-                SceneObject::Mesh {
-                    vertices,
-                    faces,
-                    color: name,
-                } => {
-                    let vertices: Vec<Vec3> = vertices.iter().map(point).collect();
-                    for face in faces {
-                        if let [Some(&a), Some(&b), Some(&c)] = face.map(|i| vertices.get(i)) {
-                            let normal = (b - a).cross(c - a).normalize_or(Vec3::Z);
-                            triangle(&mut triangles, [a, b, c], [normal; 3], color(*name));
-                        }
-                    }
-                }
+        let (mut triangles, lines) =
+            geometry(objects, |name| premultiply(style.palette.rgb(name), 255));
+        let fit = match view.reach {
+            Some((center, radius)) => Some(Fit::around(center, radius, frame)),
+            None => {
+                let points: Vec<Vec3> = triangles
+                    .iter()
+                    .map(Vertex::position)
+                    .chain(lines.iter().flat_map(|&(from, to, _)| [from, to]))
+                    .collect();
+                Fit::new(&points, camera, frame)
             }
-        }
-        let points: Vec<Vec3> = triangles
-            .iter()
-            .map(Vertex::position)
-            .chain(lines.iter().flat_map(|&(from, to, _)| [from, to]))
-            .collect();
-        let Some(mut fit) = Fit::new(&points, camera, frame) else {
+        };
+        let Some(mut fit) = fit else {
             return;
         };
         fit.zoom *= view.zoom;
@@ -473,11 +495,25 @@ impl Canvas<'_> {
         for (from, to, color) in lines {
             cylinder(&mut triangles, (from, to), radius, ROD_SEGMENTS, color);
         }
-        let view = look(view.camera, fit.center);
+        let view = look(view.camera.unwrap_or(camera), fit.center);
         let clip_from_world = self.frame.screen * fit.projection(frame, depth) * view;
         let camera = self.frame.camera(clip_from_world, view);
-        self.frame
-            .push(Pipeline::Lit, camera, Some(frame), triangles);
+        self.push(Pipeline::Lit, camera, Some(frame), triangles);
+    }
+
+    /// Add triangles at the current shape's opacity.
+    fn push(
+        &mut self,
+        pipeline: Pipeline,
+        camera: u32,
+        clip: Option<Rect>,
+        triangles: impl IntoIterator<Item = Vertex>,
+    ) {
+        let alpha = self.alpha;
+        if alpha > 0.0 {
+            let faded = triangles.into_iter().map(|vertex| vertex.faded(alpha));
+            self.frame.push(pipeline, camera, clip, faded);
+        }
     }
 
     /// Fill a convex polygon.
@@ -490,7 +526,7 @@ impl Canvas<'_> {
             .zip(rest.iter().skip(1))
             .flat_map(|(&a, &b)| [first, a, b])
             .map(|point| Vertex::solid(point, color));
-        self.frame.push(Pipeline::Solid, 0, None, triangles);
+        self.push(Pipeline::Solid, 0, self.clip, triangles);
     }
 
     /// Stroke a path centered on it, with sharp corners that match Hyprland's borders.
@@ -531,7 +567,7 @@ impl Canvas<'_> {
                 [a, b, c, b, d, c]
             })
             .map(|point| Vertex::solid(point, color));
-        self.frame.push(Pipeline::Solid, 0, None, triangles);
+        self.push(Pipeline::Solid, 0, self.clip, triangles);
     }
 
     /// Shape `content` in the style's font at `size`, wrapped to `max_width` logical units.
@@ -587,7 +623,7 @@ impl Canvas<'_> {
                 }));
             }
         }
-        self.frame.push(Pipeline::Glyph, 0, None, triangles);
+        self.push(Pipeline::Glyph, 0, self.clip, triangles);
     }
 }
 
@@ -781,6 +817,123 @@ fn point(p: &Point3) -> Vec3 {
     Vec3::new(p[0] as f32, p[1] as f32, p[2] as f32)
 }
 
+/// Each object's lit triangles and line segments, turned by its rotation about its center.
+fn geometry(
+    objects: &[SceneObject],
+    color: impl Fn(Color) -> [f32; 4],
+) -> (Vec<Vertex>, Vec<(Vec3, Vec3, [f32; 4])>) {
+    let mut triangles = Vec::new();
+    let mut lines = Vec::new();
+    for object in objects {
+        let start = triangles.len();
+        let (center, _) = ball(object);
+        let rotation = object.rotation().map_or(Quat::IDENTITY, |degrees| {
+            let [x, y, z] = degrees.map(|angle| (angle as f32).to_radians());
+            Quat::from_rotation_z(z) * Quat::from_rotation_y(y) * Quat::from_rotation_x(x)
+        });
+        let turn = |p: Vec3| center + rotation * (p - center);
+        match object {
+            SceneObject::Cuboid {
+                center,
+                size,
+                color: name,
+                ..
+            } => cuboid(&mut triangles, point(center), point(size), color(*name)),
+            SceneObject::Sphere {
+                center,
+                radius,
+                color: name,
+                ..
+            } => {
+                let center = point(center);
+                sphere(
+                    &mut triangles,
+                    center,
+                    *radius as f32,
+                    SOLID_SEGMENTS,
+                    color(*name),
+                );
+            }
+            SceneObject::Cylinder {
+                from,
+                to,
+                radius,
+                color: name,
+                ..
+            } => {
+                let ends = (point(from), point(to));
+                cylinder(
+                    &mut triangles,
+                    ends,
+                    *radius as f32,
+                    SOLID_SEGMENTS,
+                    color(*name),
+                );
+            }
+            SceneObject::Line {
+                from,
+                to,
+                color: name,
+                ..
+            } => lines.push((turn(point(from)), turn(point(to)), color(*name))),
+            SceneObject::Mesh {
+                vertices,
+                faces,
+                color: name,
+                ..
+            } => {
+                let vertices: Vec<Vec3> = vertices.iter().map(point).collect();
+                for face in faces {
+                    if let [Some(&a), Some(&b), Some(&c)] = face.map(|i| vertices.get(i)) {
+                        let normal = (b - a).cross(c - a).normalize_or(Vec3::Z);
+                        triangle(&mut triangles, [a, b, c], [normal; 3], color(*name));
+                    }
+                }
+            }
+        }
+        if let Some(turned) = triangles.get_mut(start..) {
+            turned
+                .iter_mut()
+                .for_each(|vertex| vertex.turn(center, rotation));
+        }
+    }
+    (triangles, lines)
+}
+
+/// An object's center, which it turns about, and the radius around it that holds it however
+/// it turns.
+fn ball(object: &SceneObject) -> (Vec3, f32) {
+    let ends = |from, to| {
+        let (from, to) = (point(from), point(to));
+        ((from + to) / 2.0, from.distance(to) / 2.0)
+    };
+    match object {
+        SceneObject::Cuboid { center, size, .. } => (point(center), point(size).length() / 2.0),
+        SceneObject::Sphere { center, radius, .. } => (point(center), *radius as f32),
+        SceneObject::Cylinder {
+            from, to, radius, ..
+        } => {
+            let (center, half) = ends(from, to);
+            (center, half.hypot(*radius as f32))
+        }
+        SceneObject::Line { from, to, .. } => ends(from, to),
+        SceneObject::Mesh { vertices, .. } => {
+            let points: Vec<Vec3> = vertices.iter().map(point).collect();
+            let (low, high) = points
+                .iter()
+                .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(low, high), &p| {
+                    (low.min(p), high.max(p))
+                });
+            let center = (low + high) / 2.0;
+            let radius = points
+                .iter()
+                .map(|p| p.distance(center))
+                .fold(0.0, f32::max);
+            (center, radius)
+        }
+    }
+}
+
 /// A camera circling the scene's center, and the zoom that fills the frame with the scene.
 struct Fit {
     /// The point the camera circles: the middle of the objects' bounds.
@@ -820,9 +973,7 @@ impl Fit {
             .fold((Vec2::INFINITY, Vec2::NEG_INFINITY), |(min, max), p| {
                 (min.min(p), max.max(p))
             });
-        let margin = SCENE_MARGIN.min(frame.width / 4.0).min(frame.height / 4.0);
-        let room = vec2(frame.width, frame.height) - 2.0 * margin;
-        let zoom = (room / (max - min).max(Vec2::splat(1e-6))).min_element();
+        let zoom = (room(frame) / (max - min).max(Vec2::splat(1e-6))).min_element();
         Some(Self {
             center,
             distance,
@@ -830,6 +981,20 @@ impl Fit {
             middle: (min + max) / 2.0,
             zoom,
         })
+    }
+
+    /// A fit that holds the ball at `center` of `radius` seen from any side.
+    fn around(center: Vec3, radius: f32, frame: Rect) -> Self {
+        let distance = EYE_DISTANCE * radius;
+        // Half the width of the ball's outline in the perspective image.
+        let half = radius * distance / (distance * distance - radius * radius).sqrt();
+        Self {
+            center,
+            distance,
+            radius,
+            middle: Vec2::ZERO,
+            zoom: (room(frame) / (2.0 * half)).min_element(),
+        }
     }
 
     /// Camera space to homogeneous logical screen coordinates: the perspective image,
@@ -854,6 +1019,12 @@ impl Fit {
         let z = w * (near_depth + slope) - Vec4::new(0.0, 0.0, 0.0, slope * near);
         Mat4::from_cols(x, y, z, w).transpose()
     }
+}
+
+/// The part of a scene's frame its objects may fill, inside the margin.
+fn room(frame: Rect) -> Vec2 {
+    let margin = SCENE_MARGIN.min(frame.width / 4.0).min(frame.height / 4.0);
+    vec2(frame.width, frame.height) - 2.0 * margin
 }
 
 /// World to camera space for `camera` circling `center`: x right, y up, z toward the eye.
@@ -900,16 +1071,18 @@ fn cuboid(out: &mut Vec<Vertex>, center: Vec3, size: Vec3, color: [f32; 4]) {
     }
 }
 
-fn sphere(out: &mut Vec<Vertex>, center: Vec3, radius: f32, color: [f32; 4]) {
+/// A sphere of `segments` around and half as many bands from pole to pole.
+fn sphere(out: &mut Vec<Vertex>, center: Vec3, radius: f32, segments: usize, color: [f32; 4]) {
+    let bands = segments / 2;
     let normal = |band: usize, segment: usize| {
-        let latitude = std::f32::consts::PI * (band as f32 / SPHERE_BANDS as f32 - 0.5);
-        let longitude = std::f32::consts::TAU * segment as f32 / SOLID_SEGMENTS as f32;
+        let latitude = std::f32::consts::PI * (band as f32 / bands as f32 - 0.5);
+        let longitude = std::f32::consts::TAU * segment as f32 / segments as f32;
         let (lat_sin, lat_cos) = latitude.sin_cos();
         let (lon_sin, lon_cos) = longitude.sin_cos();
         Vec3::new(lat_cos * lon_cos, lat_sin, lat_cos * lon_sin)
     };
-    for band in 0..SPHERE_BANDS {
-        for segment in 0..SOLID_SEGMENTS {
+    for band in 0..bands {
+        for segment in 0..segments {
             let normals = [
                 normal(band, segment),
                 normal(band, segment + 1),

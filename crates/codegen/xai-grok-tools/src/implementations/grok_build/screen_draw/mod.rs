@@ -1,20 +1,29 @@
-//! `screen_draw`: draw boxes, lines and arrows, text, and small 3D scenes on the screen.
+//! `screen_draw`: draw boxes, lines and arrows, text, small 3D scenes, and charts on the
+//! screen.
 //!
 //! Shapes use `screen_read`'s logical units: (x, y) from the active monitor's top-left
 //! corner. Each call replaces the whole drawing, and an empty list clears it.
 //!
+//! Shapes may change over time through keys ([`animation`]); the overlay plays them.
+//! Charts ([`chart`]) turn data into laid-out plots.
+//!
 //! The tool validates shapes, reads the desktop's look ([`Style`]), and sends one
 //! [`OverlayRequest`] line to `grok-screen-overlay`, a small Wayland process in `overlay/`
-//! that shows the drawing above all windows. Clicks pass through everywhere except scenes,
-//! which the user can drag to orbit and scroll to zoom. It lives only while a drawing is
-//! visible: clearing, cancellation, or the end of the session kills it, which removes the
-//! drawing.
+//! that shows the drawing above all windows. Clicks pass through everywhere except scenes
+//! and 3D charts, which the user can drag to orbit and scroll to zoom. It lives only while a
+//! drawing is visible: clearing, cancellation, or the end of the session kills it, which
+//! removes the drawing.
 //!
 //! `just build` builds the overlay beside the CLI. Linux builds need pkg-config and the
 //! Wayland and libxkbcommon development libraries; at run time the overlay needs a layer-shell
 //! compositor such as Hyprland.
 
+mod animation;
+mod chart;
 pub mod overlay;
+
+pub use animation::{Ease, Key, ObjectKey, Repeat};
+pub use chart::{Axis, Chart, Link, Plot, Series};
 
 use std::path::PathBuf;
 use std::process::Stdio;
@@ -57,11 +66,15 @@ const LINE_WIDTHS: std::ops::RangeInclusive<f64> = 0.5..=20.0;
 const TEXT_SIZES: std::ops::RangeInclusive<f64> = 8.0..=96.0;
 
 /// The complete drawing for the active monitor.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScreenDrawInput {
     /// Shapes that replace the current drawing. Use [] to clear the screen.
     pub shapes: Vec<Shape>,
+    /// How shapes with keys play: once, keeping the last frame (the default); in a loop; or
+    /// forward and back.
+    #[serde(default)]
+    pub repeat: Repeat,
 }
 
 /// A shape in logical units from the monitor's top-left corner.
@@ -88,6 +101,12 @@ pub enum Shape {
         /// Border width in logical units. The default is the window border width.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line_width: Option<f64>,
+        /// Opacity of the whole shape, from 0 (hidden) to 1 (the default).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// Values the shape moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<Key>,
     },
     /// A straight line from (x, y) to (to_x, to_y), with optional arrowheads.
     Line {
@@ -106,6 +125,12 @@ pub enum Shape {
         /// Solid, dashed, or dotted. The default is solid.
         #[serde(default)]
         pattern: Pattern,
+        /// Opacity of the whole shape, from 0 (hidden) to 1 (the default).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// Values the shape moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<Key>,
     },
     /// Text whose top-left corner is at (x, y), on a panel in the theme background. It may
     /// span lines and wraps at 30 times its size.
@@ -125,6 +150,12 @@ pub enum Shape {
         /// Whether to outline the panel. The default is true.
         #[serde(default = "outlined")]
         border: bool,
+        /// Opacity of the whole shape, from 0 (hidden) to 1 (the default).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// Values the shape moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<Key>,
     },
     /// A 3D view in a frame. The camera fits every object inside the frame, and the user
     /// can drag the frame to orbit the objects (sideways for yaw, up and down for pitch) and
@@ -150,7 +181,15 @@ pub enum Shape {
         #[serde(default)]
         camera: Camera,
         objects: Vec<SceneObject>,
+        /// Opacity of the whole shape, from 0 (hidden) to 1 (the default).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        opacity: Option<f64>,
+        /// Values the shape moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<Key>,
     },
+    /// A chart of data in a frame, laid out with axes, ticks, gridlines, and a legend.
+    Chart(Chart),
 }
 
 fn outlined() -> bool {
@@ -189,12 +228,21 @@ pub enum SceneObject {
         size: Point3,
         #[serde(default)]
         color: Color,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
     },
     Sphere {
         center: Point3,
         radius: f64,
         #[serde(default)]
         color: Color,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
     },
     /// A round rod between the centers of its two ends.
     Cylinder {
@@ -203,12 +251,24 @@ pub enum SceneObject {
         radius: f64,
         #[serde(default)]
         color: Color,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
     },
     Line {
         from: Point3,
         to: Point3,
         #[serde(default)]
         color: Color,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
     },
     /// Triangles; each face lists three indices into `vertices`.
     Mesh {
@@ -216,6 +276,12 @@ pub enum SceneObject {
         faces: Vec<[usize; 3]>,
         #[serde(default)]
         color: Color,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
     },
 }
 
@@ -269,6 +335,35 @@ impl Shape {
             Self::Line { .. } => "line",
             Self::Text { .. } => "text",
             Self::Scene { .. } => "scene",
+            Self::Chart(_) => "chart",
+        }
+    }
+
+    /// The whole shape's opacity, from 0 to 1.
+    pub(crate) fn opacity(&self) -> f64 {
+        match *self {
+            Self::Box { opacity, .. }
+            | Self::Line { opacity, .. }
+            | Self::Text { opacity, .. }
+            | Self::Scene { opacity, .. } => opacity.unwrap_or(1.0),
+            Self::Chart(ref chart) => chart.opacity.unwrap_or(1.0),
+        }
+    }
+
+    /// The frame, as (x, y, width, height), and camera of a shape the user can orbit and
+    /// zoom: a scene or a 3D chart.
+    pub(crate) fn orbit(&self) -> Option<((f64, f64, f64, f64), Camera)> {
+        match *self {
+            Self::Scene {
+                x,
+                y,
+                width,
+                height,
+                camera,
+                ..
+            } => Some(((x, y, width, height), camera)),
+            Self::Chart(ref c) if c.plot.is_3d() => Some(((c.x, c.y, c.width, c.height), c.camera)),
+            _ => None,
         }
     }
 
@@ -293,6 +388,7 @@ impl Shape {
                 x, y, to_x, to_y, ..
             } => vec![(x, y), (to_x, to_y)],
             Self::Text { x, y, .. } => vec![(x, y)],
+            Self::Chart(ref c) => vec![(c.x, c.y), (c.x + c.width, c.y + c.height)],
         }
     }
 
@@ -301,6 +397,7 @@ impl Shape {
             return Err("coordinates must be finite numbers");
         }
         match self {
+            _ if !(0.0..=1.0).contains(&self.opacity()) => Err("opacity must be between 0 and 1"),
             Self::Box { width, height, .. } | Self::Scene { width, height, .. }
                 if *width <= 0.0 || *height <= 0.0 =>
             {
@@ -360,14 +457,26 @@ impl Shape {
                     .as_deref()
                     .map_or(Ok(()), |label| check_text(label, false))
             }
+            Self::Chart(chart) => chart.check(),
             _ => Ok(()),
         }
     }
 }
 
 impl SceneObject {
+    /// Degrees to turn about the x, y, then z axis, around the object's center.
+    pub(crate) fn rotation(&self) -> Option<Point3> {
+        match *self {
+            Self::Cuboid { rotation, .. }
+            | Self::Cylinder { rotation, .. }
+            | Self::Line { rotation, .. }
+            | Self::Mesh { rotation, .. } => rotation,
+            Self::Sphere { .. } => None,
+        }
+    }
+
     fn check(&self) -> Result<(), &'static str> {
-        let numbers: Vec<f64> = match self {
+        let mut numbers: Vec<f64> = match self {
             Self::Cuboid { center, size, .. } => center.iter().chain(size).copied().collect(),
             Self::Sphere { center, radius, .. } => center.iter().chain([radius]).copied().collect(),
             Self::Cylinder {
@@ -376,6 +485,7 @@ impl SceneObject {
             Self::Line { from, to, .. } => from.iter().chain(to).copied().collect(),
             Self::Mesh { vertices, .. } => vertices.iter().flatten().copied().collect(),
         };
+        numbers.extend(self.rotation().into_iter().flatten());
         if !numbers.into_iter().all(finite) {
             return Err("3D coordinates must be finite numbers");
         }
@@ -437,14 +547,21 @@ pub fn validate(shapes: &[Shape]) -> Result<(), ToolError> {
         shape
             .check()
             .map_err(|problem| invalid_shape(index, shape, problem))?;
+        shape
+            .check_keys()
+            .map_err(|problem| invalid_shape(index, shape, &problem))?;
     }
     Ok(())
 }
 
-/// Reject shapes that leave the monitor. Points on its edge fit.
+/// Reject shapes that leave the monitor at any key. Points on its edge fit.
 fn fit(shapes: &[Shape], monitor: &Monitor) -> Result<(), ToolError> {
+    let style = Style::default();
     for (index, shape) in shapes.iter().enumerate() {
-        if !shape.points().iter().all(|&(x, y)| monitor.contains(x, y)) {
+        let mut moments = std::iter::once(0.0)
+            .chain(shape.times())
+            .map(|t| shape.at(t, &style));
+        if !moments.all(|shape| shape.points().iter().all(|&(x, y)| monitor.contains(x, y))) {
             let (width, height) = monitor.logical_size();
             return Err(invalid_shape(
                 index,
@@ -607,6 +724,8 @@ pub struct OverlayRequest {
     pub monitor: String,
     pub style: Style,
     pub shapes: Vec<Shape>,
+    #[serde(default)]
+    pub repeat: Repeat,
 }
 
 /// What the screen shows after a call.
@@ -652,11 +771,11 @@ impl From<ScreenDrawOutput> for ToolOutput {
 /// Drawing boundary. Install a [`PainterBackend`] to replace desktop drawing.
 #[async_trait]
 pub trait ScreenPainter: Send + Sync {
-    /// Replace the drawing on the active monitor. An empty list clears it.
+    /// Replace the drawing on the active monitor. No shapes clears it.
     ///
     /// # Errors
     /// Returns an error when the desktop cannot draw or a shape leaves the monitor.
-    async fn screen_draw(&self, shapes: &[Shape]) -> Result<ScreenDrawOutput, ToolError>;
+    async fn screen_draw(&self, input: &ScreenDrawInput) -> Result<ScreenDrawOutput, ToolError>;
 }
 
 /// A session's screen painter. Insert into tool Resources to supply another backend.
@@ -676,6 +795,69 @@ impl std::fmt::Debug for PainterBackend {
     }
 }
 
+const DESCRIPTION: &str = r#"Draw on the user's screen to point at or explain something.
+
+Screen:
+- Shapes appear on the active monitor, above all windows.
+- Clicks and typing pass through to the windows below.
+- The user can drag a scene or 3D chart to orbit it, and scroll over it to zoom.
+- Positions use screen_read's logical units: (x, y) from the monitor's top-left corner.
+- To mark a point in a screen_read window screenshot, add the window's x and y.
+- Each call replaces the previous drawing. Call with an empty list to clear it.
+- The drawing also clears when the session ends.
+
+Shapes:
+- A line runs from (x, y) to (to_x, to_y).
+- A line's arrows puts a head on its start, end, or both ends.
+- A line's pattern makes it solid, dashed, or dotted.
+- A scene is a 3D view of cuboids, spheres, cylinders, lines, and triangle meshes; y points up.
+- A scene's camera circles its objects by yaw and pitch in degrees and fits them in the frame.
+- Boxes, scenes, and text panels take a fill opacity from 0 to 1 and an optional border.
+- An outline with a faint fill highlights what is under a box; fill 1 covers it.
+- A scene with fill 0 and no border floats its objects over the windows.
+- Text without a border shows its words in its color.
+- Boxes, lines, and scenes take a line_width, and text takes a size, both in logical units.
+- The defaults follow the window border and a 14-unit font.
+- Colors come from the user's theme. accent, the default, matches the focused window's border.
+
+Animation:
+- To animate a shape, give it keys. Each key has a time `at` in seconds and the values it sets.
+- Shape keys can set x, y, width, height, to_x, to_y, color, fill, opacity, line_width, size,
+  text, and a scene's camera yaw and pitch.
+- Scene object keys can set center, size, radius, from, to, color, and rotation.
+- rotation turns an object in degrees about the x, y, then z axis around its center.
+- A key's ease sets how fields move from their previous values: linear at constant speed (the
+  default), in_out easing in and out, or step all at once when the key arrives.
+- Opacity 0 hides a shape, so step keys on opacity make flipbook frames.
+- The timeline ends at the latest key, at most 60 seconds.
+- repeat plays the timeline once and keeps the last frame (once, the default), again from the
+  start (loop), or forward and back (bounce).
+
+Charts:
+- A chart lays out its own axes, ticks, gridlines, legend, and colors in its frame.
+- Its plot is bar, line, area, scatter, pie, donut, candlestick, sankey, heatmap, surface,
+  scatter_3d, or bar_3d.
+- A chart takes 1 to 8 series, except a sankey, which takes links instead.
+- Bar, line, area, pie, and donut series give one value per category.
+- Line, area, and scatter series may give [x, y] points instead; scatter_3d series give [x, y, z].
+- Pie and donut take one series.
+- Heatmap, surface, and bar_3d take one series with a grid of equal rows.
+- A grid's columns run along x, its rows along z, and its values along y (up).
+- A heatmap shows its grid from above, with values as colors.
+- A candlestick takes one series with an [open, high, low, close] point per category.
+- Rising candles are green and falling ones red.
+- A sankey's links are each {from, to, value} between named nodes.
+- A sankey node sits one column right of its farthest source.
+- Each sankey column stacks its nodes in the order links first name them.
+- categories names the x categories, pie slices, or grid columns; rows names grid rows.
+- x_axis, y_axis, and z_axis each take a label and an optional min and max.
+- Unset axis ends fit the data.
+- stacked stacks bar, line, and area series that give values.
+- A series takes a name for the legend and a color.
+- Without colors, series take theme colors in turn and grids shade by value.
+- Keys that set series change a chart's data over time.
+- The axes fit the data of every key, so they hold still."#;
+
 /// Registered tool that draws on the active monitor.
 #[derive(Debug, Default)]
 pub struct ScreenDrawTool;
@@ -688,7 +870,7 @@ impl ToolMetadata for ScreenDrawTool {
         ToolNamespace::GrokBuild
     }
     fn description_template(&self) -> &str {
-        "Draw on the user's screen to point at or explain something: boxes, lines and arrows, short text, and small 3D scenes on the active monitor, above all windows. Clicks and typing pass through to the windows below, except that the user can drag a scene to orbit around it and scroll over it to zoom. Positions use screen_read's logical units: (x, y) from the monitor's top-left corner. To mark a point in a screen_read window screenshot, add the window's x and y. A scene is a 3D view of cuboids, spheres, cylinders, lines, and triangle meshes in one space where y points up; the camera circles them by yaw and pitch in degrees and fits them in the frame. A line runs from (x, y) to (to_x, to_y); arrows puts a head on its start, end, or both ends, and pattern makes it solid, dashed, or dotted. Boxes, scenes, and text panels take a fill opacity from 0 to 1 and an optional border: an outline with a faint fill highlights what is under a box, fill 1 covers it, a scene with fill 0 and no border floats its objects over the windows, and text without a border shows its words in its color. Boxes, lines, and scenes take a line_width and text takes a size, both in logical units; the defaults follow the window border and a 14-unit font. Colors come from the user's theme; accent, the default, matches the focused window's border. Each call replaces the previous drawing; call with an empty list to clear it. The drawing also clears when the session ends."
+        DESCRIPTION
     }
 }
 
@@ -729,7 +911,7 @@ impl Tool for ScreenDrawTool {
             }
             resources.require::<PainterBackend>()?.0.clone()
         };
-        painter.screen_draw(&input.shapes).await
+        painter.screen_draw(&input).await
     }
 }
 
@@ -741,7 +923,8 @@ struct HyprlandPainter {
 
 #[async_trait]
 impl ScreenPainter for HyprlandPainter {
-    async fn screen_draw(&self, shapes: &[Shape]) -> Result<ScreenDrawOutput, ToolError> {
+    async fn screen_draw(&self, input: &ScreenDrawInput) -> Result<ScreenDrawOutput, ToolError> {
+        let shapes = &input.shapes;
         let mut slot = self.overlay.lock().await;
         if shapes.is_empty() {
             *slot = None;
@@ -758,7 +941,8 @@ impl ScreenPainter for HyprlandPainter {
         let request = OverlayRequest {
             monitor: monitor.name.clone(),
             style: Style::current(hyprland).await,
-            shapes: shapes.to_vec(),
+            shapes: shapes.clone(),
+            repeat: input.repeat,
         };
         // The overlay stays out of the slot until it answers. A failed or canceled call
         // drops it, which kills the process and removes its drawing.
@@ -1076,12 +1260,15 @@ mod tests {
 
     #[async_trait]
     impl ScreenPainter for FakePainter {
-        async fn screen_draw(&self, shapes: &[Shape]) -> Result<ScreenDrawOutput, ToolError> {
+        async fn screen_draw(
+            &self,
+            input: &ScreenDrawInput,
+        ) -> Result<ScreenDrawOutput, ToolError> {
             Ok(ScreenDrawOutput::Drawn {
                 monitor: "fake".to_owned(),
                 width: 100.0,
                 height: 100.0,
-                shapes: shapes.len(),
+                shapes: input.shapes.len(),
             })
         }
     }
@@ -1093,13 +1280,140 @@ mod tests {
         let ctx = test_ctx(resources.into_shared());
         let input = ScreenDrawInput {
             shapes: shapes(json!([{"kind": "text", "x": 1, "y": 1, "text": "hi"}])),
+            ..Default::default()
         };
         let output = ScreenDrawTool.run(ctx.clone(), input).await.unwrap();
         assert!(matches!(output, ScreenDrawOutput::Drawn { shapes: 1, .. }));
         let invalid = ScreenDrawInput {
             shapes: shapes(json!([{"kind": "text", "x": 1, "y": 1, "text": ""}])),
+            ..Default::default()
         };
         assert!(ScreenDrawTool.run(ctx, invalid).await.is_err());
+    }
+
+    #[test]
+    fn keys_move_fields_through_time() {
+        use super::{Repeat, Style};
+
+        let shape = &shapes(json!([{
+            "kind": "box", "x": 0, "y": 0, "width": 10, "height": 10,
+            "keys": [{"at": 2, "x": 100}, {"at": 4, "x": 0, "ease": "step"}]
+        }]))[0];
+        let x = |t: f64| match shape.at(t, &Style::default()) {
+            Shape::Box { x, .. } => x,
+            other => panic!("expected a box, got {other:?}"),
+        };
+        assert_eq!([x(1.0), x(3.0), x(4.0), x(9.0)], [50.0, 100.0, 0.0, 0.0]);
+        assert_eq!(Repeat::Once.time(5.0, 4.0), (4.0, true));
+        assert_eq!(Repeat::Loop.time(5.0, 4.0), (1.0, false));
+        assert_eq!(Repeat::Bounce.time(5.0, 4.0), (3.0, false));
+        let line = |keys: serde_json::Value| {
+            shapes(json!([{"kind": "line", "x": 0, "y": 0, "to_x": 5, "to_y": 5, "keys": keys}]))
+        };
+        assert_eq!(
+            error(validate(&line(json!([{"at": 1, "width": 3}])))),
+            "Shape 1 (line): a line key cannot set width"
+        );
+        let backward = line(json!([{"at": 2, "x": 1}, {"at": 1, "x": 2}]));
+        assert!(error(validate(&backward)).contains("key times must rise"));
+        let opaque = line(json!([{"at": 1, "opacity": 2}]));
+        assert!(error(validate(&opaque)).contains("at 1 s, opacity must be between 0 and 1"));
+    }
+
+    #[test]
+    fn charts_check_their_data_and_fit_their_axes() {
+        use super::Style;
+
+        let chart = |extra: serde_json::Value| {
+            let mut chart = json!({
+                "kind": "chart", "x": 0, "y": 0, "width": 400, "height": 300, "plot": "bar",
+                "categories": ["a", "b"], "series": [{"values": [3, 7]}, {"values": [-2, 4]}]
+            });
+            let fields = chart.as_object_mut().unwrap();
+            fields.extend(extra.as_object().unwrap().clone());
+            shapes(json!([chart]))
+        };
+        let only = |shapes: Vec<Shape>| match shapes.into_iter().next() {
+            Some(Shape::Chart(chart)) => chart,
+            other => panic!("expected a chart, got {other:?}"),
+        };
+        validate(&chart(json!({}))).unwrap();
+        let [_, values, _] = only(chart(json!({}))).scales();
+        assert_eq!((values.min, values.max, values.step), (-2.0, 8.0, 2.0));
+        let stacked = only(chart(json!({"stacked": true})));
+        assert_eq!(stacked.stacks()[1], [(0.0, -2.0), (7.0, 11.0)]);
+        assert_eq!(stacked.scales()[1].max, 12.0);
+
+        let unknown = json!({"shapes": [{"kind": "chart", "x": 0, "y": 0, "width": 9, "height": 9,
+            "plot": "bar", "series": [], "colour": "red"}]});
+        assert!(serde_json::from_value::<ScreenDrawInput>(unknown).is_err());
+        assert_eq!(
+            error(validate(&chart(json!({"categories": ["a"]})))),
+            "Shape 1 (chart): each series needs one value per category"
+        );
+        assert!(error(validate(&chart(json!({"plot": "pie"})))).contains("a pie takes one series"));
+        let surface = chart(json!({"plot": "surface"}));
+        assert!(error(validate(&surface)).contains("a grid plot takes one series"));
+
+        let keys = json!([{"at": 1, "series": [{"values": [1, 30]}]}]);
+        let keyed = chart(json!({"series": [{"values": [1, 2]}], "keys": keys}));
+        validate(&keyed).unwrap();
+        let mut keyed = only(keyed);
+        keyed.pin_axes();
+        assert_eq!(
+            (keyed.y_axis.min, keyed.y_axis.max),
+            (Some(0.0), Some(30.0))
+        );
+        let halfway = only(vec![Shape::Chart(keyed).at(0.5, &Style::default())]);
+        assert_eq!(halfway.series[0].values, [1.0, 16.0]);
+
+        let candles = |points: serde_json::Value| {
+            chart(json!({"plot": "candlestick", "series": [{"points": points}]}))
+        };
+        let rising = only(candles(json!([[10, 14, 9, 13], [13, 13, 6, 7]])));
+        assert_eq!(
+            (rising.scales()[1].min, rising.scales()[1].max),
+            (6.0, 14.0)
+        );
+        let high_too_low = candles(json!([[10, 12, 9, 13], [13, 13, 6, 7]]));
+        assert!(error(validate(&high_too_low)).contains("high the highest"));
+
+        let sankey = |links: serde_json::Value| {
+            shapes(
+                json!([{"kind": "chart", "x": 0, "y": 0, "width": 400, "height": 300,
+                "plot": "sankey", "links": links}]),
+            )
+        };
+        let flows = sankey(json!([
+            {"from": "pay", "to": "rent", "value": 40}, {"from": "pay", "to": "saved", "value": 20},
+            {"from": "bonus", "to": "saved", "value": 10}, {"from": "rent", "to": "landlord", "value": 40},
+        ]));
+        validate(&flows).unwrap();
+        let nodes = only(flows).nodes().unwrap();
+        let placed: Vec<_> = nodes
+            .iter()
+            .map(|n| (n.name.as_str(), n.column, n.value))
+            .collect();
+        assert_eq!(
+            placed,
+            [
+                ("pay", 0, 60.0),
+                ("rent", 1, 40.0),
+                ("saved", 1, 30.0),
+                ("bonus", 0, 10.0),
+                ("landlord", 2, 40.0),
+            ]
+        );
+        let looped = sankey(
+            json!([{"from": "a", "to": "b", "value": 1}, {"from": "b", "to": "a", "value": 1}]),
+        );
+        assert!(error(validate(&looped)).contains("must not loop"));
+        assert!(
+            error(validate(&chart(
+                json!({"links": [{"from": "a", "to": "b", "value": 1}]})
+            )))
+            .contains("only a sankey")
+        );
     }
 
     #[cfg(target_os = "linux")]
@@ -1120,6 +1434,7 @@ mod tests {
             monitor: "eDP-1".to_owned(),
             style: Style::default(),
             shapes: shapes(json!([{"kind": "text", "x": 1, "y": 1, "text": "hi"}])),
+            repeat: Default::default(),
         };
         // Dropping a scope kills its processes, so keep it for the whole test.
         let scope = ProcessScope::new();
@@ -1150,7 +1465,7 @@ mod tests {
         use xai_grok_permission_rules::types::AccessKind;
         let kinds = ToolRegistryBuilder::new().known_tool_kinds();
         assert_eq!(kinds.get("GrokBuild:screen_draw"), Some(&ToolKind::Other));
-        let input: ToolInput = ScreenDrawInput { shapes: Vec::new() }.into();
+        let input: ToolInput = ScreenDrawInput::default().into();
         assert!(
             matches!(AccessKind::from(&input), AccessKind::Tool(name) if name == "screen_draw")
         );

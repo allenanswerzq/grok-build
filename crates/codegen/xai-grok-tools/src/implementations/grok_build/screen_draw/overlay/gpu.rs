@@ -2,26 +2,30 @@
 //!
 //! Painters describe a frame as draw data: triangles in one vertex buffer, split into draws
 //! that each pick a pipeline, a camera, and an optional clip rectangle. The GPU draws them in
-//! order into a 4× multisampled target and the pixels are read back for the Wayland buffer.
+//! order into a 4× multisampled buffer and resolves it straight into the overlay's Wayland
+//! surface ([`Target`]), so frames never pass through memory.
 //!
 //! Colors are premultiplied sRGB, the format Wayland buffers use. 2D draws ignore depth, so
 //! submission order decides what is on top. Each 3D scene owns a slice of the depth range,
 //! later scenes nearer, so depth testing works inside a scene and never across scenes.
 
+use std::ffi::c_void;
 use std::ops::Range;
-use std::time::Duration;
+use std::ptr::NonNull;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Context, Result, bail, ensure};
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat4, Vec2, Vec3, vec3};
+use glam::{Mat4, Quat, Vec2, Vec3, vec3};
+use wgpu::rwh::{WaylandDisplayHandle, WaylandWindowHandle};
 use wgpu::util::DeviceExt;
 
 use crate::implementations::grok_build::screen_draw::Rgb;
 
 const SAMPLES: u32 = 4;
-const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+/// The surface format every Vulkan Wayland driver offers, and the glyph atlas's format.
+const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8Unorm;
+const ATLAS: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const TIMEOUT: Duration = Duration::from_secs(5);
 
 /// A rectangle in logical units.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -91,6 +95,18 @@ impl Vertex {
 
     pub(super) fn position(&self) -> Vec3 {
         self.position.into()
+    }
+
+    /// The vertex at `alpha` of its opacity.
+    pub(super) fn faded(mut self, alpha: f32) -> Self {
+        self.color = self.color.map(|channel| channel * alpha);
+        self
+    }
+
+    /// Turn the vertex by `rotation` about `center`.
+    pub(super) fn turn(&mut self, center: Vec3, rotation: Quat) {
+        self.position = (center + rotation * (self.position() - center)).into();
+        self.normal = (rotation * Vec3::from(self.normal)).into();
     }
 }
 
@@ -207,12 +223,22 @@ impl Frame {
 
 /// The GPU device and pipelines, kept for the life of the overlay.
 pub(super) struct Gpu {
+    instance: wgpu::Instance,
+    adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
     bindings: wgpu::BindGroupLayout,
     solid: wgpu::RenderPipeline,
     lit: wgpu::RenderPipeline,
     glyph: wgpu::RenderPipeline,
+}
+
+/// A Wayland surface the GPU draws on, and its multisampled color and depth buffers at the
+/// configured size.
+pub(crate) struct Target {
+    surface: wgpu::Surface<'static>,
+    size: (u32, u32),
+    buffers: Option<(wgpu::TextureView, wgpu::TextureView)>,
 }
 
 impl Gpu {
@@ -311,6 +337,8 @@ impl Gpu {
         let lit = pipeline("lit", wgpu::CompareFunction::Less);
         let glyph = pipeline("glyph", wgpu::CompareFunction::Always);
         Ok(Self {
+            instance,
+            adapter,
             device,
             queue,
             bindings,
@@ -320,34 +348,58 @@ impl Gpu {
         })
     }
 
-    pub(super) fn render(&self, frame: &Frame) -> Result<Image> {
+    /// A target for the Wayland surface `window` on `display`.
+    ///
+    /// # Safety
+    /// Both must stay valid until the target is dropped.
+    pub(super) unsafe fn target(
+        &self,
+        display: NonNull<c_void>,
+        window: NonNull<c_void>,
+    ) -> Result<Target> {
+        let handles = wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(WaylandDisplayHandle::new(display).into()),
+            raw_window_handle: WaylandWindowHandle::new(window).into(),
+        };
+        // SAFETY: the caller keeps both handles valid for the life of the target.
+        let surface = unsafe { self.instance.create_surface_unsafe(handles) }
+            .context("Cannot draw on the overlay surface")?;
+        Ok(Target {
+            surface,
+            size: (0, 0),
+            buffers: None,
+        })
+    }
+
+    /// Draw `frame` on `target` and present it. Returns false when the surface skipped the
+    /// frame; painting again later shows it.
+    pub(super) fn render(&self, frame: &Frame, target: &mut Target) -> Result<bool> {
         let (width, height) = frame.size;
         let limit = self.device.limits().max_texture_dimension_2d;
         ensure!(
             width <= limit && height <= limit,
             "The drawing exceeds the GPU's {limit} pixel texture limit"
         );
-        let size = wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
+        if target.size != frame.size {
+            self.configure(target, frame.size)?;
+        }
+        let Some((color, depth)) = &target.buffers else {
+            return Ok(false);
         };
-        let texture = |format, samples, usage| {
-            self.device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size,
-                mip_level_count: 1,
-                sample_count: samples,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage,
-                view_formats: &[],
-            })
+        let output = match target.surface.get_current_texture() {
+            wgpu::CurrentSurfaceTexture::Success(output)
+            | wgpu::CurrentSurfaceTexture::Suboptimal(output) => output,
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded
+            | wgpu::CurrentSurfaceTexture::Outdated => {
+                // Configure again before the next try.
+                target.size = (0, 0);
+                return Ok(false);
+            }
+            wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Validation => {
+                bail!("The overlay surface was lost")
+            }
         };
-        let attachment = wgpu::TextureUsages::RENDER_ATTACHMENT;
-        let output = texture(COLOR, 1, attachment | wgpu::TextureUsages::COPY_SRC);
-        let color = texture(COLOR, SAMPLES, attachment).create_view(&Default::default());
-        let depth = texture(DEPTH, SAMPLES, attachment).create_view(&Default::default());
         let buffer = |contents: &[u8], usage| {
             self.device
                 .create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -376,7 +428,7 @@ impl Gpu {
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
-                format: COLOR,
+                format: ATLAS,
                 usage: wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             },
@@ -398,13 +450,13 @@ impl Gpu {
                 },
             ],
         });
-        let output_view = output.create_view(&Default::default());
+        let output_view = output.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("screen_draw"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &color,
+                    view: color,
                     depth_slice: None,
                     resolve_target: Some(&output_view),
                     ops: wgpu::Operations {
@@ -413,7 +465,7 @@ impl Gpu {
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &depth,
+                    view: depth,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Discard,
@@ -440,61 +492,59 @@ impl Gpu {
                 pass.draw(draw.vertices.clone(), draw.camera..draw.camera + 1);
             }
         }
-        self.read(encoder, &output, size)
+        self.queue.submit([encoder.finish()]);
+        self.queue.present(output);
+        Ok(true)
     }
 
-    /// Copy the rendered texture back into memory.
-    fn read(
-        &self,
-        mut encoder: wgpu::CommandEncoder,
-        texture: &wgpu::Texture,
-        size: wgpu::Extent3d,
-    ) -> Result<Image> {
-        let row = size.width as usize * 4;
-        // Copies need rows padded to 256 bytes.
-        let padded = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize);
-        let readback = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("readback"),
-            size: (padded * size.height as usize) as u64,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo {
-                buffer: &readback,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(padded as u32),
-                    rows_per_image: None,
-                },
-            },
-            size,
+    /// Configure `target` for `size` pixels, with multisampled buffers to match.
+    fn configure(&self, target: &mut Target, (width, height): (u32, u32)) -> Result<()> {
+        let capabilities = target.surface.get_capabilities(&self.adapter);
+        ensure!(
+            capabilities.formats.contains(&COLOR),
+            "The overlay surface cannot show {COLOR:?} pixels"
         );
-        let submission = self.queue.submit([encoder.finish()]);
-        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
-        readback.map_async(wgpu::MapMode::Read, .., move |result| {
-            let _ = sender.send(result);
-        });
-        self.device
-            .poll(wgpu::PollType::Wait {
-                submission_index: Some(submission),
-                timeout: Some(TIMEOUT),
-            })
-            .context("The GPU did not finish the drawing")?;
-        receiver
-            .recv_timeout(TIMEOUT)
-            .context("The GPU did not return the drawing")?
-            .context("Cannot read the drawing from the GPU")?;
-        let mut image = Image::transparent(size.width, size.height);
+        let mut config = target
+            .surface
+            .get_default_config(&self.adapter, width, height)
+            .context("The GPU cannot draw on the overlay surface")?;
+        config.format = COLOR;
+        config.view_formats = Vec::new();
+        config.alpha_mode = [
+            wgpu::CompositeAlphaMode::PreMultiplied,
+            wgpu::CompositeAlphaMode::Inherit,
+        ]
+        .into_iter()
+        .find(|mode| capabilities.alpha_modes.contains(mode))
+        .context("The overlay surface cannot be transparent")?;
+        // Frames are paced by the compositor's frame events, so presenting never waits.
+        if capabilities
+            .present_modes
+            .contains(&wgpu::PresentMode::Mailbox)
         {
-            let pixels = readback.get_mapped_range(..)?;
-            let rows = pixels.chunks(padded).filter_map(|source| source.get(..row));
-            for (source, target) in rows.zip(image.data.chunks_exact_mut(row)) {
-                target.copy_from_slice(source);
-            }
+            config.present_mode = wgpu::PresentMode::Mailbox;
         }
-        readback.unmap();
-        Ok(image)
+        target.surface.configure(&self.device, &config);
+        let buffer = |format| {
+            self.device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: SAMPLES,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        target.buffers = Some((buffer(COLOR), buffer(DEPTH)));
+        target.size = (width, height);
+        Ok(())
     }
 }

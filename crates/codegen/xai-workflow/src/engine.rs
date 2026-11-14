@@ -855,8 +855,8 @@ fn register_host_fns(engine: &mut rhai::Engine, ctx: &Rc<RefCell<Ctx>>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio_util::sync::CancellationToken;
     use crate::host::{AgentResult, BudgetState};
+    use tokio_util::sync::CancellationToken;
 
     fn spawn_mock_host(
         mut rx: mpsc::UnboundedReceiver<WorkflowHostRequest>,

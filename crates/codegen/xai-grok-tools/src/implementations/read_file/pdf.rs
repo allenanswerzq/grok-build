@@ -5,9 +5,9 @@ use std::fmt::Write as _;
 #[cfg(feature = "pdf")]
 use base64::{Engine as _, engine::general_purpose};
 
+use crate::types::output::{FileContent, ReadFileOutput};
 #[cfg(feature = "pdf")]
 use crate::types::output::{PdfPageImage, PdfPageImages};
-use crate::types::output::{FileContent, ReadFileOutput};
 
 use super::metadata::{bytes_to_metadata, is_pdf_magic};
 
