@@ -2687,9 +2687,23 @@ impl SessionActor {
                 vec![],
                 vec![],
             ),
+            ToolInput::ScreenRead(_) => (
+                "Read screen".to_string(),
+                acp::ToolKind::Read,
+                vec![],
+                vec![],
+            ),
+            ToolInput::ScreenDraw(ref draw) => {
+                let title = match draw.shapes.len() {
+                    0 => "Clear screen drawing".to_string(),
+                    1 => "Draw 1 shape".to_string(),
+                    count => format!("Draw {count} shapes"),
+                };
+                (title, acp::ToolKind::Other, vec![], vec![])
+            }
             #[allow(unreachable_patterns)]
             _ => (
-                "Tool call".to_string(),
+                wire_name.to_string(),
                 acp::ToolKind::Other,
                 vec![],
                 vec![],

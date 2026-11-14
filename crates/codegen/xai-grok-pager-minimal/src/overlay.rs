@@ -248,7 +248,7 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
     } else {
         0
     };
-    let chrome = 1u16 // status row
+    let chrome = (1 + super::live::STATUS_GAP) // gap + status row
         .saturating_add(below_h)
         .saturating_add(sl_h)
         .saturating_add(prompt_h);
@@ -257,7 +257,7 @@ fn compute_target(app: &mut AppView, term_h: u16, width: u16) -> u16 {
     content_target(tail_h, todos_h, btw_h, below_h, prompt_h, sl_h, ceiling)
 }
 
-/// Live-viewport height sized to exactly its content: tail + todo panel + /btw panel + status row + overlay + prompt + the `[ui.status_line]` row.
+/// Live-viewport height sized to exactly its content: tail + todo panel + /btw panel + gap + status row + overlay + prompt + the `[ui.status_line]` row.
 /// Floored at 2 (status + prompt), capped at the screen.
 fn content_target(
     tail_h: u16,
@@ -271,7 +271,7 @@ fn content_target(
     tail_h
         .saturating_add(todos_h)
         .saturating_add(btw_h)
-        .saturating_add(1) // status row
+        .saturating_add(1 + super::live::STATUS_GAP) // gap + status row
         .saturating_add(overlay_h)
         .saturating_add(prompt_h)
         .saturating_add(sl_h)
@@ -1048,19 +1048,19 @@ mod tests {
     fn content_target_fits_content_with_no_gap() {
         // Viewport = tail + todos + btw + status(1) + overlay + prompt, with no base floor, so the prompt sits right after the conversation
         // Idle (tail 0, empty prompt) is just status + prompt
-        assert_eq!(content_target(0, 0, 0, 0, 1, 0, 40), 2); // status + 1-row prompt
-        assert_eq!(content_target(0, 3, 0, 0, 1, 0, 40), 5); // + 3 todo rows
-        assert_eq!(content_target(0, 3, 0, 5, 2, 0, 40), 11); // + overlay(5) + 2-row prompt
+        assert_eq!(content_target(0, 0, 0, 0, 1, 0, 40), 3); // gap + status + 1-row prompt
+        assert_eq!(content_target(0, 3, 0, 0, 1, 0, 40), 6); // + 3 todo rows
+        assert_eq!(content_target(0, 3, 0, 5, 2, 0, 40), 12); // + overlay(5) + 2-row prompt
         // /btw Loading is 3 rows; Done/Error grow with the content.
-        assert_eq!(content_target(0, 0, 3, 0, 1, 0, 40), 5); // + btw(3)
+        assert_eq!(content_target(0, 0, 3, 0, 1, 0, 40), 6); // + btw(3)
         // Production idle always reserves at least one row below the prompt (info bar)
-        assert_eq!(content_target(0, 0, 3, 1, 1, 0, 40), 6); // btw+status+info+prompt
+        assert_eq!(content_target(0, 0, 3, 1, 1, 0, 40), 7); // btw+status+info+prompt
         // The todo and btw panels stack without collapsing either
-        assert_eq!(content_target(0, 3, 3, 0, 1, 0, 40), 8);
+        assert_eq!(content_target(0, 3, 3, 0, 1, 0, 40), 9);
         // The streaming tail grows the viewport (no fixed empty gap while "thinking": tail 0 is just status + prompt)
-        assert_eq!(content_target(6, 0, 0, 0, 1, 0, 40), 8); // tail(6) + status + prompt
-        assert_eq!(content_target(0, 0, 0, 1, 1, 1, 40), 4); // + status_line row
-        assert_eq!(content_target(0, 0, 0, 1, 1, 3, 40), 6); // 3-line script output
+        assert_eq!(content_target(6, 0, 0, 0, 1, 0, 40), 9); // tail(6) + gap + status + prompt
+        assert_eq!(content_target(0, 0, 0, 1, 1, 1, 40), 5); // + status_line row
+        assert_eq!(content_target(0, 0, 0, 1, 1, 3, 40), 7); // 3-line script output
         // Floored at 2 (status + prompt) and capped at the screen ceiling.
         assert_eq!(content_target(0, 0, 0, 0, 0, 0, 40), 2);
         assert_eq!(content_target(50, 0, 0, 0, 0, 0, 20), 20);
@@ -1113,7 +1113,7 @@ mod tests {
         assert_eq!(visible(3, 12, 40), 3);
         assert_eq!(visible(3, 80, 2), 0);
         assert_eq!(visible(3, 80, 3), 3);
-        assert_eq!(content_target(0, 0, visible(3, 11, 40), 1, 1, 0, 40), 3);
-        assert_eq!(content_target(0, 0, visible(3, 80, 2), 1, 1, 0, 5), 3);
+        assert_eq!(content_target(0, 0, visible(3, 11, 40), 1, 1, 0, 40), 4);
+        assert_eq!(content_target(0, 0, visible(3, 80, 2), 1, 1, 0, 5), 4);
     }
 }

@@ -20,6 +20,8 @@ use xai_grok_pager::terminal::TerminalContext;
 use xai_grok_pager::theme::Theme;
 use xai_grok_pager::views::prompt_widget::{PromptBg, PromptStyle};
 use xai_grok_pager::views::turn_status;
+/// Blank rows between the model output and the status row above the prompt.
+pub(super) const STATUS_GAP: u16 = 1;
 /// Left inset (columns) for every auxiliary live-region row and the prompt's `chrome_pad_left`. Minimal is
 /// flush-left. Content glyphs (`◆` / `$` / message text) thus start at column 0, matching the welcome card's outer
 /// edge.
@@ -241,7 +243,7 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal, ctx: &Terminal
                 );
                 return (cursor, None);
             }
-            let status_h = 1u16.min(area.height);
+            let status_h = (1 + STATUS_GAP).min(area.height);
             let sl_h = status_line_frame
                 .height()
                 .min(area.height.saturating_sub(status_h + 1));
@@ -347,9 +349,9 @@ pub fn draw_live(app: &mut AppView, terminal: &mut PagerTerminal, ctx: &Terminal
             let status_area = inset_left(
                 Rect {
                     x: area.x,
-                    y: area.y + tail_h + todos_h + btw_h,
+                    y: area.y + tail_h + todos_h + btw_h + status_h.saturating_sub(1),
                     width: area.width,
-                    height: status_h,
+                    height: status_h.min(1),
                 },
                 row_inset,
             );
