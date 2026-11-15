@@ -13,7 +13,6 @@ pub mod deploy_app;
 pub mod enter_plan_mode;
 pub mod exit_plan_mode;
 pub mod grep;
-pub(crate) mod hyprland;
 pub mod image_edit;
 pub mod image_gen;
 #[path = "init_or_update_app_stub.rs"]
@@ -25,6 +24,7 @@ pub mod media_bearer;
 pub mod monitor;
 pub mod read_file;
 pub mod scheduler;
+mod screen;
 pub mod screen_draw;
 pub mod screen_read;
 pub mod search_replace;

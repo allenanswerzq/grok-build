@@ -7,19 +7,16 @@
 //! another size switch when their key arrives. The timeline lasts until the latest key, and
 //! [`Repeat`] says how it plays.
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{
-    BOX_FILL, Chart, Color, Point3, SCENE_FILL, SceneObject, Series, Shape, Style, TEXT_FILL,
-};
+use super::{Chart, Color, Point3, SceneObject, Series, Shape, Style};
 
 /// The longest timeline, and the most keys on one shape or object.
 const MAX_SECONDS: f64 = 60.0;
 const MAX_KEYS: usize = 64;
 
 /// How the timeline plays.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Repeat {
     /// Once, then the last frame stays.
@@ -32,7 +29,7 @@ pub enum Repeat {
 }
 
 /// How a field moves toward a key's value.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Ease {
     /// At a constant speed.
@@ -47,7 +44,7 @@ pub enum Ease {
 /// Values some of a shape's fields reach `at` seconds in. A key sets only fields its shape
 /// has; `yaw` and `pitch` turn a scene's or chart's camera, and `series` replaces a chart's
 /// data.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Key {
     /// Seconds from the start. Keys go in time order.
@@ -87,7 +84,7 @@ pub struct Key {
 
 /// Values some of a scene object's fields reach `at` seconds in. A key sets only fields its
 /// object has.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct ObjectKey {
     /// Seconds from the start. Keys go in time order.
@@ -111,7 +108,7 @@ pub struct ObjectKey {
 
 impl Repeat {
     /// Where a timeline `seconds` long is after `elapsed` seconds, and whether it stays there.
-    pub(super) fn time(self, elapsed: f64, seconds: f64) -> (f64, bool) {
+    pub fn time(self, elapsed: f64, seconds: f64) -> (f64, bool) {
         if seconds <= 0.0 {
             return (0.0, true);
         }
@@ -244,12 +241,12 @@ macro_rules! keyed {
 }
 
 /// How long the shapes' timeline lasts: until its latest key.
-pub(super) fn seconds(shapes: &[Shape]) -> f64 {
+pub fn seconds(shapes: &[Shape]) -> f64 {
     shapes.iter().flat_map(Shape::times).fold(0.0, f64::max)
 }
 
 impl Shape {
-    pub(super) fn keys(&self) -> &[Key] {
+    pub fn keys(&self) -> &[Key] {
         match self {
             Self::Box { keys, .. }
             | Self::Line { keys, .. }
@@ -260,7 +257,7 @@ impl Shape {
     }
 
     /// The times of the shape's keys and its objects' keys.
-    pub(super) fn times(&self) -> Vec<f64> {
+    pub fn times(&self) -> Vec<f64> {
         let objects = match self {
             Self::Scene { objects, .. } => objects.as_slice(),
             _ => &[],
@@ -273,9 +270,8 @@ impl Shape {
             .collect()
     }
 
-    /// The shape `t` seconds in. Unset fields that keys move start from their defaults in
-    /// `style`.
-    pub(super) fn at(&self, t: f64, style: &Style) -> Self {
+    /// The shape `t` seconds in. Unset fields that keys move start from their defaults.
+    pub fn at(&self, t: f64, style: &Style) -> Self {
         let mut shape = self.clone();
         match &mut shape {
             Self::Box {
@@ -289,8 +285,8 @@ impl Shape {
                 opacity,
                 keys,
                 ..
-            } => keyed!(keys, t: x, y, width, height, color, fill = BOX_FILL,
-                line_width = style.line_width, opacity = 1.0),
+            } => keyed!(keys, t: x, y, width, height, color, fill = self.fill(),
+                line_width = self.line_width(style), opacity = 1.0),
             Self::Line {
                 x,
                 y,
@@ -302,7 +298,7 @@ impl Shape {
                 keys,
                 ..
             } => keyed!(keys, t: x, y, to_x, to_y, color,
-                line_width = style.line_width * 1.5, opacity = 1.0),
+                line_width = self.line_width(style), opacity = 1.0),
             Self::Text {
                 x,
                 y,
@@ -313,8 +309,8 @@ impl Shape {
                 opacity,
                 keys,
                 ..
-            } => keyed!(keys, t: x, y, text, color, size = style.font_size, fill = TEXT_FILL,
-                opacity = 1.0),
+            } => keyed!(keys, t: x, y, text, color, size = self.text_size(style),
+                fill = self.fill(), opacity = 1.0),
             Self::Scene {
                 x,
                 y,
@@ -328,8 +324,8 @@ impl Shape {
                 keys,
                 ..
             } => {
-                keyed!(keys, t: x, y, width, height, fill = SCENE_FILL,
-                    line_width = style.line_width, opacity = 1.0);
+                keyed!(keys, t: x, y, width, height, fill = self.fill(),
+                    line_width = self.line_width(style), opacity = 1.0);
                 track(&mut camera.yaw, &keys[..], t, |key| key.yaw.as_ref());
                 track(&mut camera.pitch, &keys[..], t, |key| key.pitch.as_ref());
                 for object in objects.iter_mut() {
@@ -343,7 +339,7 @@ impl Shape {
 
     /// Keys run forward within the longest timeline, set only fields their shape or object
     /// has, and reach values the shape accepts.
-    pub(super) fn check_keys(&self) -> Result<(), String> {
+    pub(crate) fn check_keys(&self) -> Result<(), String> {
         check_timeline(self.keys(), self.kind(), self.keyable())?;
         if let Self::Scene { objects, .. } = self {
             for object in objects {
@@ -400,7 +396,7 @@ impl Shape {
 
 impl Chart {
     /// The chart `t` seconds in.
-    pub(super) fn at(&self, t: f64, style: &Style) -> Self {
+    pub fn at(&self, t: f64, style: &Style) -> Self {
         let mut chart = self.clone();
         let Self {
             x,
@@ -415,8 +411,8 @@ impl Chart {
             keys,
             ..
         } = &mut chart;
-        keyed!(keys, t: x, y, width, height, series, fill = SCENE_FILL,
-            line_width = style.line_width, opacity = 1.0);
+        keyed!(keys, t: x, y, width, height, series, fill = self.fill(),
+            line_width = self.line_width(style), opacity = 1.0);
         track(&mut camera.yaw, &keys[..], t, |key| key.yaw.as_ref());
         track(&mut camera.pitch, &keys[..], t, |key| key.pitch.as_ref());
         chart
@@ -445,7 +441,7 @@ impl SceneObject {
     }
 
     /// The object `t` seconds in.
-    pub(super) fn at(&self, t: f64) -> Self {
+    pub fn at(&self, t: f64) -> Self {
         let mut object = self.clone();
         match &mut object {
             Self::Cuboid {

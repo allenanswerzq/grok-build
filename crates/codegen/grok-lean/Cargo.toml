@@ -6,8 +6,8 @@ license.workspace = true
 publish = false
 
 # A second composition root over the same pager, agent, and tools as `xai-grok-pager-bin`,
-# started with lean defaults. `screen_draw` finds `grok-screen-overlay` beside this binary,
-# so build that `xai-grok-pager-bin` target into the same profile.
+# started with lean defaults. The screen tools find `xai-screen` beside this binary,
+# so build that package into the same profile.
 
 [dependencies]
 anyhow = { workspace = true }

@@ -1,6 +1,6 @@
 //! Wayland side: one overlay layer that shows the latest drawing.
 //!
-//! A stdin thread forwards request lines to a calloop event loop that also dispatches
+//! A thread forwards request lines to a calloop event loop that also dispatches
 //! Wayland events. A request is answered after the compositor presents a frame painted
 //! from it, so the tool returns only once the drawing is on screen.
 //!
@@ -15,17 +15,10 @@
 //! up zooms in.
 
 use std::ffi::c_void;
-use std::io::{BufRead, Read, Write};
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
-use super::gpu::Target;
-use super::paint::{Painter, View};
-use crate::implementations::grok_build::screen_draw::{
-    Camera, OverlayRequest, Shape, animation::seconds,
-};
 use anyhow::{Context, Result, anyhow};
-use serde_json::json;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
     delegate_dispatch2, delegate_registry,
@@ -66,7 +59,12 @@ use smithay_client_toolkit::{
     },
 };
 
-const MAX_REQUEST: u64 = 1024 * 1024;
+use super::gpu::Target;
+use super::model::{Camera, Request, Shape, Style, seconds};
+use super::paint::{Painter, View};
+use super::{Input, Placed, forward_requests, place, reply};
+use crate::hyprland::Monitor;
+
 const NAMESPACE: &str = "grok-screen-draw";
 /// Linux's code for the left mouse button.
 const LEFT_BUTTON: u32 = 0x110;
@@ -75,12 +73,6 @@ const DRAG_DEGREES: f64 = 0.5;
 /// How much one logical unit of scrolling zooms: a wheel notch of 15 units is about 16%.
 const ZOOM_PER_UNIT: f32 = 0.01;
 const ZOOMS: std::ops::RangeInclusive<f32> = 0.2..=10.0;
-
-enum Input {
-    Line(Vec<u8>),
-    Failed(String),
-    End,
-}
 
 pub(super) fn run() -> Result<()> {
     let connection = Connection::connect_to_env().context("Cannot connect to Wayland")?;
@@ -113,16 +105,7 @@ pub(super) fn run() -> Result<()> {
     let (sender, receiver) = channel::sync_channel(4);
     std::thread::Builder::new()
         .name("draw-requests".to_owned())
-        .spawn(move || {
-            let mut reader = std::io::stdin().lock();
-            loop {
-                let input = read_request(&mut reader);
-                let done = !matches!(input, Input::Line(_));
-                if sender.send(input).is_err() || done {
-                    break;
-                }
-            }
-        })?;
+        .spawn(move || forward_requests(|input| sender.send(input).is_ok()))?;
     let request_qh = qh.clone();
     event_loop
         .handle()
@@ -146,37 +129,6 @@ pub(super) fn run() -> Result<()> {
     Ok(())
 }
 
-fn read_request(reader: &mut impl BufRead) -> Input {
-    let mut line = Vec::new();
-    match reader
-        .by_ref()
-        .take(MAX_REQUEST + 1)
-        .read_until(b'\n', &mut line)
-    {
-        Ok(0) => Input::End,
-        Ok(_) if line.len() as u64 > MAX_REQUEST => {
-            Input::Failed("Drawing request exceeds 1 MiB".to_owned())
-        }
-        Ok(_) if line.last() != Some(&b'\n') => {
-            Input::Failed("Incomplete drawing request".to_owned())
-        }
-        Ok(_) => Input::Line(line),
-        Err(error) => Input::Failed(format!("Cannot read drawing request: {error}")),
-    }
-}
-
-/// Answer the waiting request: `{}` when the drawing shows, otherwise the reason it cannot.
-fn reply(error: Option<&str>) -> Result<()> {
-    let mut output = std::io::stdout().lock();
-    match error {
-        Some(error) => serde_json::to_writer(&mut output, &json!({ "error": error }))?,
-        None => output.write_all(b"{}")?,
-    }
-    output.write_all(b"\n")?;
-    output.flush()?;
-    Ok(())
-}
-
 /// The visible drawing: a full-screen overlay layer on one output.
 struct Drawing {
     /// Dropped first, while its surface still exists.
@@ -185,7 +137,9 @@ struct Drawing {
     fractional: Option<wp_fractional_scale_v1::WpFractionalScaleV1>,
     viewport: Option<wp_viewport::WpViewport>,
     output: wl_output::WlOutput,
-    request: OverlayRequest,
+    monitor: Monitor,
+    style: Style,
+    request: Request,
     /// The shapes as last painted, at their current point in the timeline.
     shown: Vec<Shape>,
     /// When the timeline started, and its length in seconds.
@@ -336,20 +290,24 @@ impl Pointer {
 
 impl Overlay {
     fn request(&mut self, line: &[u8], qh: &QueueHandle<Self>) -> Result<()> {
-        let request: OverlayRequest = match serde_json::from_slice(line) {
-            Ok(request) => request,
-            Err(error) => return reply(Some(&format!("Invalid drawing request: {error}"))),
+        let Placed {
+            request,
+            monitor,
+            style,
+        } = match place(line) {
+            Ok(placed) => placed,
+            Err(error) => return reply(Err(&error)),
         };
         let named = |output: &wl_output::WlOutput| {
             self.outputs
                 .info(output)
-                .is_some_and(|info| info.name.as_deref() == Some(request.monitor.as_str()))
+                .is_some_and(|info| info.name.as_deref() == Some(monitor.name.as_str()))
         };
         let Some(output) = self.outputs.outputs().find(named) else {
-            return reply(Some(&format!("Unknown monitor {}", request.monitor)));
+            return reply(Err(&format!("Wayland has no monitor {}", monitor.name)));
         };
         if let Some(drawing) = self.drawing.as_mut().filter(|d| d.output == output) {
-            drawing.request = request;
+            (drawing.monitor, drawing.style, drawing.request) = (monitor, style, request);
             drawing.restart();
             return catch_scenes(&self.compositor, drawing);
         }
@@ -384,7 +342,7 @@ impl Overlay {
         // its surface.
         let target = match unsafe { self.painter.target(self.display, window) } {
             Ok(target) => target,
-            Err(error) => return reply(Some(&format!("{error:#}"))),
+            Err(error) => return reply(Err(&format!("{error:#}"))),
         };
         let mut drawing = Drawing {
             target,
@@ -392,6 +350,8 @@ impl Overlay {
             fractional,
             viewport,
             output,
+            monitor,
+            style,
             request,
             shown: Vec::new(),
             start: Instant::now(),
@@ -417,7 +377,7 @@ impl Overlay {
     fn dismiss(&mut self, reason: &str) {
         if let Some(drawing) = self.drawing.take()
             && drawing.unanswered
-            && let Err(error) = reply(Some(reason))
+            && let Err(error) = reply(Err(reason))
         {
             self.error = Some(error);
         }
@@ -431,7 +391,7 @@ impl Overlay {
         let elapsed = d.start.elapsed().as_secs_f64();
         let (t, settled) = d.request.repeat.time(elapsed, d.seconds);
         if d.seconds > 0.0 {
-            let style = &d.request.style;
+            let style = &d.style;
             d.shown = d.request.shapes.iter().map(|s| s.at(t, style)).collect();
             catch_scenes(&self.compositor, d)?;
         }
@@ -445,7 +405,7 @@ impl Overlay {
             surface.set_buffer_scale(d.scale as i32);
         }
         surface.frame(qh, FrameCallbackData(surface.clone()));
-        let (style, shapes) = (&d.request.style, &d.shown);
+        let (style, shapes) = (&d.style, &d.shown);
         match (self.painter).paint(&mut d.target, style, shapes, &d.views, d.size, d.scale) {
             Ok(shown) => {
                 d.dirty = !shown;
@@ -529,7 +489,7 @@ impl CompositorHandler for Overlay {
         if !drawing.settled {
             drawing.dirty = true;
         }
-        if answer && let Err(error) = reply(None) {
+        if answer && let Err(error) = reply(Ok(&drawing.monitor)) {
             self.error = Some(error);
         }
     }

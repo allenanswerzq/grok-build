@@ -91,6 +91,7 @@ members = [
     "crates/codegen/xai-prompt-queue",
     "crates/codegen/xai-ratatui-inline",
     "crates/codegen/xai-ratatui-textarea",
+    "crates/codegen/xai-screen",
     "crates/codegen/xai-sqlite-journal",
     "crates/codegen/xai-system-power",
     "crates/codegen/xai-token-estimation",

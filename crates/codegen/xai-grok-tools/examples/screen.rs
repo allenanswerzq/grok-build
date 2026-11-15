@@ -7,10 +7,10 @@
 //! Each case is exactly what a model would send to `screen_draw`: a `shapes` list, or the
 //! whole input when it also sets `repeat`. It is printed in the terminal while it is on
 //! screen; only the caption at the top is added. Cases 12 to 21 animate, and cases 22 to 31
-//! chart data. The cases fit a monitor of 1280 × 800 logical units. The example also serves
-//! as its own overlay process, so it needs no separately built `grok-screen-overlay`.
+//! chart data. The cases fit a monitor of 1280 × 800 logical units.
 //!
 //! ```sh
+//! just build xai-screen
 //! just build xai-grok-tools --example screen
 //! ./target/debug/examples/screen draw
 //! ```
@@ -21,15 +21,16 @@ use std::path::Path;
 use anyhow::{Context, Result, bail, ensure};
 use base64::Engine as _;
 use serde_json::{Value, json};
-use xai_grok_tools::implementations::grok_build::screen_draw::{
-    ScreenDrawInput, ScreenDrawTool, overlay,
-};
+use xai_grok_tools::implementations::grok_build::screen_draw::{ScreenDrawInput, ScreenDrawTool};
 use xai_grok_tools::implementations::grok_build::screen_read::{ScreenReadInput, ScreenReadTool};
 use xai_grok_tools::types::resources::Resources;
 use xai_grok_tools::types::tool_metadata::test_ctx;
 use xai_tool_runtime::{Tool, ToolCallContext};
 
-const CASES: [(&str, fn() -> Value); 31] = [
+/// A caption and the drawing it shows.
+type Case = (&'static str, fn() -> Value);
+
+const CASES: [Case; 31] = [
     ("Box colors", case_1_box_colors),
     ("Box fill and border", case_2_box_fill_and_border),
     ("Lines and arrows", case_3_lines_and_arrows),
@@ -1254,17 +1255,6 @@ fn round(value: f64) -> f64 {
 }
 
 fn main() -> Result<()> {
-    let this = std::env::current_exe()?;
-    match std::env::var_os("GROK_SCREEN_OVERLAY") {
-        // `screen_draw` started this binary as its overlay process.
-        Some(path) if Path::new(&path) == this => {
-            overlay::main();
-            return Ok(());
-        }
-        Some(_) => {}
-        // SAFETY: no other threads exist yet.
-        None => unsafe { std::env::set_var("GROK_SCREEN_OVERLAY", &this) },
-    }
     tokio::runtime::Runtime::new()?.block_on(cases())
 }
 

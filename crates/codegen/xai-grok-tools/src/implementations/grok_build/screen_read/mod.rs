@@ -1,12 +1,9 @@
 //! `screen_read`: show the model what is on the screen.
 //!
 //! The tool returns every window visible on the active monitor except Alacritty terminals.
-//! On Hyprland, each window is captured by itself with `grim -T`, so the wallpaper and
-//! overlapping windows never appear in its screenshot. Positions are logical units from the
-//! monitor's top-left corner. Chrome windows also carry the visible page's accessibility
-//! text; see [`chrome`].
-
-mod chrome;
+//! `xai-screen read` captures them; this tool fits each screenshot into the model's image
+//! budget. Positions are logical units from the monitor's top-left corner. Chrome windows also
+//! carry the visible page's accessibility text.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -22,22 +19,22 @@ use xai_tool_runtime::{
 };
 use xai_tool_types::ToolDescription;
 
-use super::hyprland::{Client, Hyprland, Monitor};
+use super::screen::{ScreenProcess, failure};
 use crate::implementations::read_file::image::{
     MAX_IMAGE_DIMENSION, MAX_IMAGE_PIXELS, MAX_IMAGE_RAW_BYTES,
 };
 use crate::types::output::ImageContent;
 use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::types::tool_metadata::{ToolMetadata, shared_resources};
+use crate::util::ProcessScope;
 use crate::util::image_compress::{FilterType, ReEncodeParams, re_encode_under_limit};
 
-/// Windows whose class starts with this prefix are terminals and are never captured.
-const TERMINAL_CLASS: &str = "Alacritty";
-const MAX_WINDOWS: usize = 8;
 /// Smallest side the encoder may shrink to when an image exceeds the byte budget.
 const MIN_IMAGE_SIDE: u32 = 128;
 const JPEG_QUALITY_STEPS: &[u8] = &[85, 70, 50, 40];
 const READ_TIMEOUT: Duration = Duration::from_secs(20);
+/// Eight 4K window screenshots fit with room to spare.
+const MAX_CAPTURE: u64 = 256 * 1024 * 1024;
 
 /// The tool accepts only an empty argument object.
 #[derive(Debug, Default, Clone, Serialize, Deserialize, JsonSchema)]
@@ -227,7 +224,11 @@ impl Tool for ScreenReadTool {
             let resources = shared_resources(&ctx)?;
             let mut resources = resources.lock().await;
             if resources.get::<ScreenBackend>().is_none() {
-                resources.insert(ScreenBackend::new(HyprlandScreen));
+                let scope = resources
+                    .get::<ProcessScope>()
+                    .cloned()
+                    .unwrap_or_else(ProcessScope::new);
+                resources.insert(ScreenBackend::new(DesktopScreen { scope }));
             }
             resources.require::<ScreenBackend>()?.0.clone()
         };
@@ -235,108 +236,71 @@ impl Tool for ScreenReadTool {
     }
 }
 
-/// Reads the screen through [`Hyprland`].
-#[derive(Debug)]
-struct HyprlandScreen;
+/// Reads the screen with `xai-screen read`.
+struct DesktopScreen {
+    scope: ProcessScope,
+}
 
 #[async_trait]
-impl ScreenReader for HyprlandScreen {
+impl ScreenReader for DesktopScreen {
     async fn screen_read(&self) -> Result<ScreenReadOutput, ToolError> {
-        let Some(hyprland) = Hyprland::session() else {
-            return Err(failure("Reading requires a Hyprland session and grim"));
-        };
-        tokio::time::timeout(READ_TIMEOUT, read(hyprland))
-            .await
-            .map_err(|_| ToolError::new(ToolErrorKind::Timeout, "Screen read timed out"))?
+        let capture = tokio::time::timeout(READ_TIMEOUT, async {
+            let mut reader = ScreenProcess::spawn("read", &self.scope)?;
+            reader.receive::<Capture>(MAX_CAPTURE).await
+        })
+        .await
+        .map_err(|_| ToolError::new(ToolErrorKind::Timeout, "Screen read timed out"))??
+        .map_err(failure)?;
+        let windows = tokio::task::spawn_blocking(move || {
+            capture
+                .windows
+                .into_iter()
+                .map(window)
+                .collect::<Result<Vec<_>, _>>()
+        });
+        Ok(ScreenReadOutput {
+            observation_id: uuid::Uuid::now_v7().to_string(),
+            monitor: capture.monitor,
+            width: capture.width,
+            height: capture.height,
+            windows: windows.await.map_err(failure)??,
+            notes: capture.notes,
+        })
     }
 }
 
-async fn read(hyprland: Hyprland) -> Result<ScreenReadOutput, ToolError> {
-    let monitor = hyprland.active_monitor().await?;
-    let (width, height) = monitor.logical_size();
-    let mut output = ScreenReadOutput {
-        observation_id: uuid::Uuid::now_v7().to_string(),
-        monitor: monitor.name.clone(),
-        width,
-        height,
-        windows: Vec::new(),
-        notes: Vec::new(),
-    };
-    if hyprland.locked().await {
-        output
-            .notes
-            .push("The screen is locked, so no windows were captured".to_owned());
-        return Ok(output);
-    }
-    let clients = hyprland.clients().await?;
-    let visible = readable(&monitor, &clients);
-    if visible.len() > MAX_WINDOWS {
-        output.notes.push(format!(
-            "Only the first {MAX_WINDOWS} of {} windows were captured",
-            visible.len()
-        ));
-    }
-    let captured = visible.get(..MAX_WINDOWS).unwrap_or(&visible);
-    for client in captured {
-        output
-            .windows
-            .push(capture(hyprland, client, &monitor).await?);
-    }
-    chrome::describe(captured, &mut output).await;
-
-    // Windows are captured one by one, and bounds come from the first snapshot.
-    // Reject a read during which the workspace, window set, or any geometry changed.
-    let monitor_after = hyprland.active_monitor().await?;
-    let clients_after = hyprland.clients().await?;
-    if monitor_after != monitor || !same_layout(&visible, &readable(&monitor, &clients_after)) {
-        return Err(failure(
-            "Windows changed during capture; call screen_read again",
-        ));
-    }
-    Ok(output)
+/// What `xai-screen read` prints.
+#[derive(Deserialize)]
+struct Capture {
+    monitor: String,
+    width: f64,
+    height: f64,
+    windows: Vec<CapturedWindow>,
+    notes: Vec<String>,
 }
 
-/// Windows shown on `monitor`, minus terminals, in reading order.
-fn readable<'a>(monitor: &Monitor, clients: &'a [Client]) -> Vec<&'a Client> {
-    monitor
-        .windows(clients)
-        .into_iter()
-        .filter(|client| !client.class.starts_with(TERMINAL_CLASS))
-        .collect()
+#[derive(Deserialize)]
+struct CapturedWindow {
+    id: String,
+    class: String,
+    title: String,
+    bounds: WindowBounds,
+    /// A base64 PNG.
+    png: String,
+    accessibility: Option<String>,
 }
 
-/// Whether two snapshots list the same windows at the same positions and sizes.
-/// Titles may change freely; they do not affect the captured pixels' placement.
-fn same_layout(before: &[&Client], after: &[&Client]) -> bool {
-    fn layout<'a>(client: &&'a Client) -> (&'a str, [f64; 2], [f64; 2]) {
-        (&client.stable_id, client.at, client.size)
-    }
-    before.iter().map(layout).eq(after.iter().map(layout))
-}
-
-async fn capture(
-    hyprland: Hyprland,
-    client: &Client,
-    monitor: &Monitor,
-) -> Result<ScreenWindow, ToolError> {
-    let png = hyprland.capture(client).await?;
-    let bounds = WindowBounds {
-        x: client.at[0] - monitor.x,
-        y: client.at[1] - monitor.y,
-        width: client.size[0],
-        height: client.size[1],
-    };
-    let (bytes, pixel_width, pixel_height, mime_type) =
-        tokio::task::spawn_blocking(move || encode(&png, bounds))
-            .await
-            .map_err(failure)??;
+fn window(captured: CapturedWindow) -> Result<ScreenWindow, ToolError> {
+    let base64 = base64::engine::general_purpose::STANDARD;
+    let png = base64.decode(&captured.png).map_err(failure)?;
+    let (bytes, pixel_width, pixel_height, mime_type) = encode(&png, captured.bounds)?;
     Ok(ScreenWindow {
-        id: client.stable_id.clone(),
-        class: client.class.clone(),
-        title: client.title.clone(),
-        bounds,
+        id: captured.id,
+        class: captured.class,
+        title: captured.title,
+        bounds: captured.bounds,
         image: ImageContent {
-            data: base64::engine::general_purpose::STANDARD.encode(bytes),
+            data: base64.encode(bytes),
             mime_type: mime_type.to_owned(),
             annotations: None,
             uri: None,
@@ -344,7 +308,7 @@ async fn capture(
         },
         pixel_width,
         pixel_height,
-        accessibility: None,
+        accessibility: captured.accessibility,
     })
 }
 
@@ -377,10 +341,6 @@ fn encode(
     re_encode_under_limit(&image, &params).map_err(failure)
 }
 
-fn failure(error: impl std::fmt::Display) -> ToolError {
-    ToolError::new(ToolErrorKind::Execution, format!("Screen: {error}"))
-}
-
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -390,9 +350,8 @@ mod tests {
 
     use super::{
         ScreenBackend, ScreenReadInput, ScreenReadOutput, ScreenReadTool, ScreenReader,
-        ScreenWindow, WindowBounds, encode, readable, same_layout,
+        ScreenWindow, WindowBounds, encode,
     };
-    use crate::implementations::grok_build::hyprland::fixtures::{client, ids, monitor};
     use crate::types::output::{ImageContent, ToolOutput, ToolRunResult};
     use crate::types::resources::Resources;
     use crate::types::tool_metadata::test_ctx;
@@ -502,39 +461,6 @@ mod tests {
         let input: ToolInput = ScreenReadInput {}.into();
         assert!(matches!(AccessKind::from(&input), AccessKind::Read(None)));
         assert!(ScreenReadTool.capabilities().is_read_only);
-    }
-
-    #[test]
-    fn terminals_are_never_read() {
-        let clients = [
-            client("right", "dev.zed.Zed", 1, [1640.0, 36.0]),
-            client("terminal", "Alacritty", 1, [1004.0, 36.0]),
-            client("scratchpad", "Alacritty-scratchpad", 1, [1004.0, 400.0]),
-            client("left", "google-chrome", 1, [1004.0, 36.0]),
-        ];
-        assert_eq!(ids(&readable(&monitor(), &clients)), ["left", "right"]);
-
-        let mut terminal = client("terminal", "Alacritty", 1, [1000.0, 0.0]);
-        terminal.fullscreen = 1;
-        let clients = [
-            client("covered", "dev.zed.Zed", 1, [1004.0, 36.0]),
-            terminal,
-        ];
-        assert!(readable(&monitor(), &clients).is_empty());
-    }
-
-    #[test]
-    fn moved_or_resized_windows_invalidate_a_capture() {
-        let before = [client("a", "dev.zed.Zed", 1, [4.0, 36.0])];
-        let mut renamed = client("a", "dev.zed.Zed", 1, [4.0, 36.0]);
-        renamed.title = "new title".to_owned();
-        assert!(same_layout(&[&before[0]], &[&renamed]));
-        let moved = client("a", "dev.zed.Zed", 1, [8.0, 36.0]);
-        assert!(!same_layout(&[&before[0]], &[&moved]));
-        let mut resized = client("a", "dev.zed.Zed", 1, [4.0, 36.0]);
-        resized.size = [700.0, 760.0];
-        assert!(!same_layout(&[&before[0]], &[&resized]));
-        assert!(!same_layout(&[&before[0]], &[]));
     }
 
     #[test]

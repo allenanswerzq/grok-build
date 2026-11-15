@@ -10,13 +10,12 @@
 //! takes links between named nodes instead of series, and places each node in the column
 //! after its farthest source ([`Chart::nodes`]).
 //!
-//! Axis ends left unset fit the data, rounded out to whole ticks. A chart whose keys change
-//! its data fits the data of every key once ([`Chart::pin_axes`]), so its axes hold still.
+//! Axis ends left unset fit the data, rounded out to whole ticks ([`Scale`]).
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use super::{Camera, Color, Key, LINE_WIDTHS, Style, check_text, finite, outlined};
+use super::shape::{LINE_WIDTHS, SCENE_FILL, check_text, finite, outlined};
+use super::{Camera, Color, Key, Style};
 
 const MAX_SERIES: usize = 8;
 const MAX_NAMES: usize = 100;
@@ -26,7 +25,7 @@ const MAX_VALUES: usize = 5_000;
 const TICKS: f64 = 5.0;
 
 /// A chart of data in a frame, in logical units from the monitor's top-left corner.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Chart {
     pub x: f64,
@@ -82,7 +81,7 @@ pub struct Chart {
 }
 
 /// How a chart shows its data.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Plot {
     Bar,
@@ -102,17 +101,17 @@ pub enum Plot {
 }
 
 impl Plot {
-    pub(crate) fn is_3d(self) -> bool {
+    pub fn is_3d(self) -> bool {
         matches!(self, Self::Surface | Self::Scatter3d | Self::Bar3d)
     }
 
-    pub(crate) fn has_grid(self) -> bool {
+    pub fn has_grid(self) -> bool {
         matches!(self, Self::Heatmap | Self::Surface | Self::Bar3d)
     }
 }
 
 /// One set of data. A plot reads the field that fits it.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Series {
     /// Shown in the legend.
@@ -134,7 +133,7 @@ pub struct Series {
 }
 
 /// A flow of `value` from one sankey node to another.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Link {
     pub from: String,
@@ -144,14 +143,14 @@ pub struct Link {
 
 /// A sankey node: its name, its column, and the larger of its flows in and out.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct Node {
-    pub(crate) name: String,
-    pub(crate) column: usize,
-    pub(crate) value: f64,
+pub struct Node {
+    pub name: String,
+    pub column: usize,
+    pub value: f64,
 }
 
 /// An axis's name and range.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Axis {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -164,98 +163,25 @@ pub struct Axis {
     pub max: Option<f64>,
 }
 
-/// A numeric axis: its range and the step between ticks.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Scale {
-    pub(crate) min: f64,
-    pub(crate) max: f64,
-    pub(crate) step: f64,
-}
-
-impl Scale {
-    /// The range `axis` sets, with unset ends fitting `extent` rounded out to whole ticks.
-    fn fit(axis: &Axis, extent: Option<(f64, f64)>) -> Self {
-        let (low, high) = extent.unwrap_or((0.0, 1.0));
-        let mut scale = Self::exact(axis.min.unwrap_or(low), axis.max.unwrap_or(high));
-        // Rounding the ends out to whole steps can widen the range enough to want a larger
-        // step, so round until the step holds; fitting a fitted range then changes nothing.
-        for _ in 0..3 {
-            let step = scale.step;
-            let min = axis.min.unwrap_or((scale.min / step).floor() * step);
-            let max = axis.max.unwrap_or((scale.max / step).ceil() * step);
-            scale = Self::exact(min, max);
-            if scale.step == step {
-                break;
-            }
-        }
-        scale
-    }
-
-    /// The range from `low` to `high`, widened when it is empty.
-    pub(crate) fn exact(low: f64, high: f64) -> Self {
-        let (min, max) = if high > low {
-            (low, high)
-        } else {
-            (low - 0.5, low + 0.5)
-        };
-        Self {
-            min,
-            max,
-            step: nice((max - min) / TICKS),
-        }
-    }
-
-    /// Where `value` falls, from 0 at the minimum to 1 at the maximum.
-    pub(crate) fn place(self, value: f64) -> f64 {
-        (value - self.min) / (self.max - self.min)
-    }
-
-    /// The ticks within the range: whole steps.
-    pub(crate) fn ticks(self) -> impl Iterator<Item = f64> {
-        let first = (self.min / self.step - 1e-9).ceil() as i64;
-        let last = (self.max / self.step + 1e-9).floor() as i64;
-        (first..=last)
-            .take(100)
-            .map(move |tick| tick as f64 * self.step)
-    }
-}
-
-/// A round step near `raw`: 1, 2, or 5 times a power of ten.
-fn nice(raw: f64) -> f64 {
-    if !(raw > 0.0 && raw.is_finite()) {
-        return 1.0;
-    }
-    let power = 10_f64.powf(raw.log10().floor());
-    let step = match raw / power {
-        share if share < 1.5 => 1.0,
-        share if share < 3.0 => 2.0,
-        share if share < 7.0 => 5.0,
-        _ => 10.0,
-    };
-    step * power
-}
-
 impl Chart {
-    /// The x, y, and z scales of the data. A grid's columns and rows use [`Chart::span`].
-    pub(crate) fn scales(&self) -> [Scale; 3] {
-        let extents = self.extents();
-        let axes = [&self.x_axis, &self.y_axis, &self.z_axis];
-        std::array::from_fn(|axis| Scale::fit(axes[axis], extents[axis]))
+    /// Backdrop opacity, from 0 to 1.
+    pub fn fill(&self) -> f64 {
+        self.fill.unwrap_or(SCENE_FILL)
     }
 
-    /// The values a grid's `count` columns or rows span along `axis`.
-    pub(crate) fn span(axis: &Axis, count: usize) -> Scale {
-        Scale::exact(axis.min.unwrap_or(1.0), axis.max.unwrap_or(count as f64))
+    /// Frame and data line width in logical units.
+    pub fn line_width(&self, style: &Style) -> f64 {
+        self.line_width.unwrap_or(style.line_width)
     }
 
     /// The first series's grid, which grid plots draw.
-    pub(crate) fn grid(&self) -> &[Vec<f64>] {
+    pub fn grid(&self) -> &[Vec<f64>] {
         self.series.first().map_or(&[], |series| &series.grid)
     }
 
     /// Sankey nodes in the order links first name them, each one column after its farthest
     /// source. None when the links loop back to a node.
-    pub(crate) fn nodes(&self) -> Option<Vec<Node>> {
+    pub fn nodes(&self) -> Option<Vec<Node>> {
         let mut names: Vec<&str> = Vec::new();
         let mut index = |name| {
             names
@@ -304,102 +230,7 @@ impl Chart {
         Some(nodes.collect())
     }
 
-    /// Where each series's bar, line, or area runs in each category, as (from, to): from 0,
-    /// or stacked on the series before, positive values rising and negative ones falling.
-    pub(crate) fn stacks(&self) -> Vec<Vec<(f64, f64)>> {
-        let count = self
-            .series
-            .iter()
-            .map(|s| s.values.len())
-            .max()
-            .unwrap_or(0);
-        let (mut rising, mut falling) = (vec![0.0; count], vec![0.0; count]);
-        let mut stacks = Vec::new();
-        for series in &self.series {
-            let mut spans = Vec::new();
-            for (index, &value) in series.values.iter().enumerate() {
-                let top = if value >= 0.0 {
-                    &mut rising
-                } else {
-                    &mut falling
-                };
-                match top.get_mut(index).filter(|_| self.stacked) {
-                    Some(top) => {
-                        spans.push((*top, *top + value));
-                        *top += value;
-                    }
-                    None => spans.push((0.0, value)),
-                }
-            }
-            stacks.push(spans);
-        }
-        stacks
-    }
-
-    /// The lowest and highest data value along x, y, and z, where the data sets them.
-    fn extents(&self) -> [Option<(f64, f64)>; 3] {
-        let mut extents = [None; 3];
-        let mut add = |axis: usize, value: f64| {
-            let (low, high) = extents[axis].get_or_insert((value, value));
-            *low = value.min(*low);
-            *high = value.max(*high);
-        };
-        for series in &self.series {
-            for point in &series.points {
-                if self.plot == Plot::Candlestick {
-                    point.iter().for_each(|&v| add(1, v));
-                } else {
-                    point
-                        .iter()
-                        .take(3)
-                        .enumerate()
-                        .for_each(|(axis, &v)| add(axis, v));
-                }
-            }
-            series
-                .grid
-                .iter()
-                .flatten()
-                .for_each(|&value| add(1, value));
-        }
-        for (from, to) in self.stacks().into_iter().flatten() {
-            if self.stacked {
-                add(1, from);
-            }
-            add(1, to);
-        }
-        if matches!(self.plot, Plot::Bar | Plot::Area | Plot::Bar3d) {
-            add(1, 0.0);
-        }
-        extents
-    }
-
-    /// Fix unset axis ends to fit the data at every key, so the axes hold still while keys
-    /// change the data.
-    pub(crate) fn pin_axes(&mut self) {
-        if self.keys.iter().all(|key| key.series.is_none()) {
-            return;
-        }
-        let style = Style::default();
-        let extents = std::iter::once(0.0)
-            .chain(self.keys.iter().map(|key| key.at))
-            .map(|t| self.at(t, &style).extents())
-            .fold([None; 3], |all: [Option<(f64, f64)>; 3], extents| {
-                std::array::from_fn(|axis| match (all[axis], extents[axis]) {
-                    (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
-                    (one, other) => one.or(other),
-                })
-            });
-        let axes = [&mut self.x_axis, &mut self.y_axis, &mut self.z_axis];
-        for (axis, extent) in axes.into_iter().zip(extents) {
-            if extent.is_some() {
-                let scale = Scale::fit(axis, extent);
-                (axis.min, axis.max) = (Some(scale.min), Some(scale.max));
-            }
-        }
-    }
-
-    pub(super) fn check(&self) -> Result<(), &'static str> {
+    pub(crate) fn check(&self) -> Result<(), &'static str> {
         let series = &self.series;
         let axes = [&self.x_axis, &self.y_axis, &self.z_axis];
         let numbers = series.iter().flat_map(|s| {
@@ -531,5 +362,238 @@ impl Chart {
             .chain(nodes))
         .chain(&self.label)
         .try_for_each(|name| check_text(name, false))
+    }
+}
+
+impl Chart {
+    /// The x, y, and z scales of the data. A grid's columns and rows use [`Scale::span`].
+    pub fn scales(&self) -> [Scale; 3] {
+        let extents = extents(self);
+        let axes = [&self.x_axis, &self.y_axis, &self.z_axis];
+        std::array::from_fn(|axis| Scale::fit(axes[axis], extents[axis]))
+    }
+
+    /// Where each series's bar, line, or area runs in each category, as (from, to): from 0,
+    /// or stacked on the series before, positive values rising and negative ones falling.
+    pub fn stacks(&self) -> Vec<Vec<(f64, f64)>> {
+        let count = self
+            .series
+            .iter()
+            .map(|s| s.values.len())
+            .max()
+            .unwrap_or(0);
+        let (mut rising, mut falling) = (vec![0.0; count], vec![0.0; count]);
+        let mut stacks = Vec::new();
+        for series in &self.series {
+            let mut spans = Vec::new();
+            for (index, &value) in series.values.iter().enumerate() {
+                let top = if value >= 0.0 {
+                    &mut rising
+                } else {
+                    &mut falling
+                };
+                match top.get_mut(index).filter(|_| self.stacked) {
+                    Some(top) => {
+                        spans.push((*top, *top + value));
+                        *top += value;
+                    }
+                    None => spans.push((0.0, value)),
+                }
+            }
+            stacks.push(spans);
+        }
+        stacks
+    }
+
+    /// Fix unset axis ends to fit the data at every key, so the axes hold still while keys
+    /// change the data.
+    pub fn pin_axes(&mut self) {
+        if self.keys.iter().all(|key| key.series.is_none()) {
+            return;
+        }
+        let style = Style::default();
+        let extents = std::iter::once(0.0)
+            .chain(self.keys.iter().map(|key| key.at))
+            .map(|t| extents(&self.at(t, &style)))
+            .fold([None; 3], |all: [Option<(f64, f64)>; 3], extents| {
+                std::array::from_fn(|axis| match (all[axis], extents[axis]) {
+                    (Some((a, b)), Some((c, d))) => Some((a.min(c), b.max(d))),
+                    (one, other) => one.or(other),
+                })
+            });
+        let axes = [&mut self.x_axis, &mut self.y_axis, &mut self.z_axis];
+        for (axis, extent) in axes.into_iter().zip(extents) {
+            if extent.is_some() {
+                let scale = Scale::fit(axis, extent);
+                (axis.min, axis.max) = (Some(scale.min), Some(scale.max));
+            }
+        }
+    }
+}
+
+/// A numeric axis: its range and the step between ticks.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Scale {
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+}
+
+impl Scale {
+    /// The range `axis` sets, with unset ends fitting `extent` rounded out to whole ticks.
+    fn fit(axis: &Axis, extent: Option<(f64, f64)>) -> Self {
+        let (low, high) = extent.unwrap_or((0.0, 1.0));
+        let mut scale = Self::exact(axis.min.unwrap_or(low), axis.max.unwrap_or(high));
+        // Rounding the ends out to whole steps can widen the range enough to want a larger
+        // step, so round until the step holds; fitting a fitted range then changes nothing.
+        for _ in 0..3 {
+            let step = scale.step;
+            let min = axis.min.unwrap_or((scale.min / step).floor() * step);
+            let max = axis.max.unwrap_or((scale.max / step).ceil() * step);
+            scale = Self::exact(min, max);
+            if scale.step == step {
+                break;
+            }
+        }
+        scale
+    }
+
+    /// The range from `low` to `high`, widened when it is empty.
+    pub fn exact(low: f64, high: f64) -> Self {
+        let (min, max) = if high > low {
+            (low, high)
+        } else {
+            (low - 0.5, low + 0.5)
+        };
+        Self {
+            min,
+            max,
+            step: nice((max - min) / TICKS),
+        }
+    }
+
+    /// The values a grid's `count` columns or rows span along `axis`.
+    pub fn span(axis: &Axis, count: usize) -> Self {
+        Self::exact(axis.min.unwrap_or(1.0), axis.max.unwrap_or(count as f64))
+    }
+
+    /// Where `value` falls, from 0 at the minimum to 1 at the maximum.
+    pub fn place(self, value: f64) -> f64 {
+        (value - self.min) / (self.max - self.min)
+    }
+
+    /// The ticks within the range: whole steps.
+    pub fn ticks(self) -> impl Iterator<Item = f64> {
+        let first = (self.min / self.step - 1e-9).ceil() as i64;
+        let last = (self.max / self.step + 1e-9).floor() as i64;
+        (first..=last)
+            .take(100)
+            .map(move |tick| tick as f64 * self.step)
+    }
+}
+
+/// A round step near `raw`: 1, 2, or 5 times a power of ten.
+fn nice(raw: f64) -> f64 {
+    if !(raw > 0.0 && raw.is_finite()) {
+        return 1.0;
+    }
+    let power = 10_f64.powf(raw.log10().floor());
+    let step = match raw / power {
+        share if share < 1.5 => 1.0,
+        share if share < 3.0 => 2.0,
+        share if share < 7.0 => 5.0,
+        _ => 10.0,
+    };
+    step * power
+}
+
+/// The lowest and highest data value along x, y, and z, where the data sets them.
+fn extents(chart: &Chart) -> [Option<(f64, f64)>; 3] {
+    let mut extents = [None; 3];
+    let mut add = |axis: usize, value: f64| {
+        let (low, high) = extents[axis].get_or_insert((value, value));
+        *low = value.min(*low);
+        *high = value.max(*high);
+    };
+    for series in &chart.series {
+        for point in &series.points {
+            if chart.plot == Plot::Candlestick {
+                point.iter().for_each(|&v| add(1, v));
+            } else {
+                point
+                    .iter()
+                    .take(3)
+                    .enumerate()
+                    .for_each(|(axis, &v)| add(axis, v));
+            }
+        }
+        series
+            .grid
+            .iter()
+            .flatten()
+            .for_each(|&value| add(1, value));
+    }
+    for (from, to) in chart.stacks().into_iter().flatten() {
+        if chart.stacked {
+            add(1, from);
+        }
+        add(1, to);
+    }
+    if matches!(chart.plot, Plot::Bar | Plot::Area | Plot::Bar3d) {
+        add(1, 0.0);
+    }
+    extents
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn chart(fields: serde_json::Value) -> Chart {
+        let mut chart = json!({
+            "x": 0, "y": 0, "width": 400, "height": 300, "plot": "bar",
+            "categories": ["a", "b"], "series": [{"values": [3, 7]}, {"values": [-2, 4]}]
+        });
+        let all = chart.as_object_mut().unwrap();
+        all.extend(fields.as_object().unwrap().clone());
+        serde_json::from_value(chart).unwrap()
+    }
+
+    #[test]
+    fn scales_round_out_to_whole_ticks() {
+        let bars = chart(json!({}));
+        assert_eq!(
+            bars.scales()[1],
+            Scale {
+                min: -2.0,
+                max: 8.0,
+                step: 2.0
+            }
+        );
+
+        let stacked = chart(json!({"stacked": true}));
+        assert_eq!(stacked.stacks()[1], [(0.0, -2.0), (7.0, 11.0)]);
+        assert_eq!(stacked.scales()[1].max, 12.0);
+
+        let candles = chart(json!({
+            "plot": "candlestick", "series": [{"points": [[10, 14, 9, 13], [13, 13, 6, 7]]}]
+        }));
+        let [_, prices, _] = candles.scales();
+        assert_eq!((prices.min, prices.max), (6.0, 14.0));
+    }
+
+    #[test]
+    fn pinned_axes_fit_every_key() {
+        let mut keyed = chart(json!({
+            "series": [{"values": [1, 2]}],
+            "keys": [{"at": 1, "series": [{"values": [1, 30]}]}]
+        }));
+        keyed.pin_axes();
+        assert_eq!(
+            (keyed.y_axis.min, keyed.y_axis.max),
+            (Some(0.0), Some(30.0))
+        );
     }
 }

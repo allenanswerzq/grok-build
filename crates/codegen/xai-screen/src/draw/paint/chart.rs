@@ -11,14 +11,11 @@ use std::f32::consts::{FRAC_PI_2, TAU};
 use cosmic_text::Weight;
 use glam::{Vec2, Vec3, vec2, vec3};
 
-use super::{
-    Canvas, Fit, LINE_HEIGHT, Pipeline, Rect, Vertex, View, WRAP_EMS, circle, cuboid, cylinder,
-    look, opacity, premultiply, rect, rounded, sphere,
-};
-use crate::implementations::grok_build::screen_draw::chart::Scale;
-use crate::implementations::grok_build::screen_draw::{
-    Axis, Chart, Palette, Plot, Rgb, SCENE_FILL,
-};
+use super::scene::{Fit, View, cuboid, cylinder, look, sphere};
+use super::text::{LINE_HEIGHT, Text, WRAP_EMS};
+use super::{Canvas, circle, opacity, rect, rounded};
+use crate::draw::gpu::{Pipeline, Rect, Vertex, premultiply};
+use crate::draw::model::{Axis, Chart, Palette, Plot, Rgb, Scale};
 
 /// Space inside the frame, and between labels and what they name, in logical units.
 const PADDING: f32 = 14.0;
@@ -61,9 +58,9 @@ impl Canvas<'_> {
         let style = self.style;
         let frame = rect(chart.x, chart.y, chart.width, chart.height);
         let outline = rounded(frame, style.rounding as f32);
-        let backdrop = opacity(chart.fill, SCENE_FILL);
+        let backdrop = opacity(chart.fill());
         self.fill(&outline, premultiply(style.palette.background, backdrop));
-        let line = chart.line_width.unwrap_or(style.line_width) as f32;
+        let line = chart.line_width(style) as f32;
         if chart.border {
             self.stroke(&outline, true, line, premultiply(style.palette.accent, 255));
         }
@@ -701,7 +698,7 @@ impl Canvas<'_> {
     }
 
     /// Text in the small size.
-    fn text(&mut self, content: &str) -> super::Text {
+    fn text(&mut self, content: &str) -> Text {
         let size = self.small();
         self.layout(content, Weight::NORMAL, size, WRAP_EMS * size)
     }
@@ -763,7 +760,7 @@ fn slots(names: &[String], axis: &Axis, count: usize, centered: bool) -> Marks {
             .map(|(index, name)| (place(index as f64), name.clone()))
             .collect();
     }
-    let span = Chart::span(axis, count);
+    let span = Scale::span(axis, count);
     if count < 2 {
         return vec![(place(0.0), number(span.min + 0.5, 1.0))];
     }

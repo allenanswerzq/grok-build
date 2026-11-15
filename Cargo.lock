@@ -15575,10 +15575,8 @@ dependencies = [
  "async-trait",
  "base64 0.22.1",
  "bstr",
- "bytemuck",
  "chrono",
  "command-fds",
- "cosmic-text",
  "derive_more 2.1.1",
  "dhat",
  "dunce",
@@ -15588,7 +15586,6 @@ dependencies = [
  "fs2",
  "futures",
  "futures-util",
- "glam",
  "globset",
  "htmd",
  "ignore",
@@ -15601,7 +15598,6 @@ dependencies = [
  "nix 0.30.1",
  "parking_lot",
  "pdf_oxide",
- "pollster",
  "pretty_assertions",
  "pulldown-cmark",
  "quick-xml 0.41.0",
@@ -15616,7 +15612,6 @@ dependencies = [
  "sha2 0.10.9",
  "shellexpand",
  "similar",
- "smithay-client-toolkit",
  "strip-ansi-escapes",
  "strum 0.26.3",
  "tar",
@@ -15631,7 +15626,6 @@ dependencies = [
  "unicode-normalization",
  "url",
  "uuid",
- "wgpu",
  "which",
  "wildmatch",
  "windows 0.61.3",
@@ -16002,6 +15996,23 @@ dependencies = [
  "tui-scrollbar",
  "unicode-segmentation",
  "unicode-width 0.2.0",
+]
+
+[[package]]
+name = "xai-screen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "bytemuck",
+ "cosmic-text",
+ "glam",
+ "pollster",
+ "serde",
+ "serde_json",
+ "smithay-client-toolkit",
+ "tungstenite",
+ "wgpu",
 ]
 
 [[package]]

@@ -19,7 +19,7 @@ use glam::{Mat4, Quat, Vec2, Vec3, vec3};
 use wgpu::rwh::{WaylandDisplayHandle, WaylandWindowHandle};
 use wgpu::util::DeviceExt;
 
-use crate::implementations::grok_build::screen_draw::Rgb;
+use super::model::Rgb;
 
 const SAMPLES: u32 = 4;
 /// The surface format every Vulkan Wayland driver offers, and the glyph atlas's format.
