@@ -1,0 +1,199 @@
+name: Release grok-lean
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag, such as v0.1.0
+        required: true
+        type: string
+
+concurrency:
+  group: release-grok-lean-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  NIGHTLY_TOOLCHAIN: nightly-2026-10-04
+  PROTOC_VERSION: "29.3"
+  PROTOC_SHA256: 3e866620c5be27664f3d2fa2d656b5f3e09b5152b42f1bedbf427b333e90021a
+  TARGET: x86_64-unknown-linux-gnu
+
+jobs:
+  release:
+    name: Build and publish Linux x86_64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          persist-credentials: false
+
+      - name: Resolve release version
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            release_tag="$INPUT_TAG"
+          else
+            release_tag="$REF_NAME"
+          fi
+
+          if [[ ! "$release_tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0, got: $release_tag" >&2
+            exit 1
+          fi
+
+          release_version="${release_tag#v}"
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/codegen/grok-lean/Cargo.toml | head -n1)"
+          if [[ "$release_version" != "$cargo_version" ]]; then
+            echo "Tag $release_tag does not match grok-lean version $cargo_version." >&2
+            echo "Update crates/codegen/grok-lean/Cargo.toml before tagging." >&2
+            exit 1
+          fi
+
+          asset_base="grok-lean-${release_tag}-${TARGET}"
+          {
+            echo "RELEASE_TAG=$release_tag"
+            echo "RELEASE_VERSION=$release_version"
+            echo "ASSET_BASE=$asset_base"
+          } >> "$GITHUB_ENV"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake \
+            libffi-dev \
+            libwayland-dev \
+            pkg-config \
+            unzip \
+            zlib1g-dev
+
+      - name: Install pinned protoc
+        run: |
+          protoc_root="$RUNNER_TEMP/protoc"
+          protoc_zip="$RUNNER_TEMP/protoc.zip"
+          curl -fsSL \
+            "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-x86_64.zip" \
+            -o "$protoc_zip"
+          echo "$PROTOC_SHA256  $protoc_zip" | sha256sum -c -
+          unzip -q "$protoc_zip" -d "$protoc_root"
+          echo "PROTOC=$protoc_root/bin/protoc" >> "$GITHUB_ENV"
+          "$protoc_root/bin/protoc" --version
+
+      - name: Install Rust nightly
+        run: |
+          rustup toolchain install "$NIGHTLY_TOOLCHAIN" \
+            --profile minimal \
+            --component rust-src
+          rustup run "$NIGHTLY_TOOLCHAIN" rustc --version
+          rustup run "$NIGHTLY_TOOLCHAIN" cargo --version
+
+      - name: Build grok-lean
+        env:
+          GROK_VERSION: ${{ env.RELEASE_VERSION }}
+        run: |
+          rustup run "$NIGHTLY_TOOLCHAIN" cargo build -p grok-lean --locked -j "$(nproc)" \
+            --profile lean --config crates/codegen/grok-lean/lean.toml
+
+      - name: Check binary
+        run: |
+          binary="target/$TARGET/lean/grok-lean"
+          test -x "$binary"
+          file "$binary"
+          ldd "$binary"
+          actual_version="$("$binary" --version)"
+          expected_version="grok-lean $RELEASE_VERSION"
+          echo "$actual_version"
+          if [[ "$actual_version" != "$expected_version" ]]; then
+            echo "Expected '$expected_version', got '$actual_version'." >&2
+            exit 1
+          fi
+
+      - name: Package release assets
+        run: |
+          dist="dist"
+          package_dir="$dist/package/$ASSET_BASE"
+          mkdir -p "$package_dir"
+
+          install -m 0755 "target/$TARGET/lean/grok-lean" "$dist/$ASSET_BASE"
+          install -m 0755 "target/$TARGET/lean/grok-lean" "$package_dir/grok-lean"
+          install -m 0644 LICENSE THIRD-PARTY-NOTICES "$package_dir/"
+          install -m 0644 third_party/NOTICE "$package_dir/THIRD-PARTY-NOTICE"
+
+          source_epoch="$(git log -1 --format=%ct)"
+          tar --sort=name \
+            --mtime="@$source_epoch" \
+            --owner=0 --group=0 --numeric-owner \
+            -C "$dist/package" \
+            -cf "$dist/$ASSET_BASE.tar" \
+            "$ASSET_BASE"
+          gzip -n -9 "$dist/$ASSET_BASE.tar"
+          rm -rf "$dist/package"
+
+          (
+            cd "$dist"
+            sha256sum "$ASSET_BASE" "$ASSET_BASE.tar.gz" > SHA256SUMS
+            sha256sum -c SHA256SUMS
+          )
+
+          cat > "$dist/RELEASE_NOTES.md" <<EOF
+          Linux x86_64 build of grok-lean $RELEASE_VERSION from commit $GITHUB_SHA.
+
+          Download either the standalone binary or the tarball, then verify it with SHA256SUMS:
+
+          \`\`\`bash
+          sha256sum -c SHA256SUMS --ignore-missing
+          \`\`\`
+
+          You can also verify the GitHub build provenance:
+
+          \`\`\`bash
+          gh attestation verify $ASSET_BASE --repo $GITHUB_REPOSITORY
+          \`\`\`
+
+          Built with Rust $NIGHTLY_TOOLCHAIN on GitHub Actions.
+          EOF
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            dist/${{ env.ASSET_BASE }}
+            dist/${{ env.ASSET_BASE }}.tar.gz
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          assets=(
+            "dist/$ASSET_BASE"
+            "dist/$ASSET_BASE.tar.gz"
+            "dist/SHA256SUMS"
+          )
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "grok-lean $RELEASE_TAG" \
+              --notes-file dist/RELEASE_NOTES.md \
+              --verify-tag
+          fi
