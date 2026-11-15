@@ -96,18 +96,22 @@ Fields (? marks optional):
 - line: x, y, to_x, to_y, color?, arrows? (none, start, end, both), pattern? (solid, dashed,
   dotted), line_width?, opacity?, keys?
 - text: x, y, text, color?, size?, fill?, border?, opacity?, keys?
-- scene: x, y, width, height, objects, label?, camera? {yaw?, pitch?}, fill?, border?,
-  line_width?, opacity?, keys?
+- scene: x, y, width, height, objects, label?, camera? {yaw?, pitch?}, background?, fill?,
+  border?, line_width?, opacity?, keys?
 - chart: x, y, width, height, plot, label?, categories?, rows?, series?, links?, x_axis?,
   y_axis?, z_axis?, stacked?, camera?, fill?, border?, line_width?, opacity?, keys?
 - Scene objects, by kind: cuboid {center, size, rotation?}, sphere {center, radius},
-  cylinder {from, to, radius, rotation?}, line {from, to, rotation?}, mesh {vertices, faces,
-  rotation?}; each also takes color? and keys?. Points and sizes are [x, y, z].
+  ellipsoid {center, size, rotation?}, cylinder {from, to, radius, rotation?}, tube {points,
+  radius, radii?, pouches?, rotation?}, coil {center, size, radius, rotation?}, blob {balls,
+  rotation?}, mesh {vertices, faces, rotation?}, line {from, to, rotation?}, label {point,
+  text}; each also takes color? and keys?.
+- Solid objects (all but line and label) also take material? (plastic, flesh, or glass).
+- Points and sizes are [x, y, z]; a blob ball is [x, y, z, radius].
 - A mesh face is [a, b, c], three indices into vertices.
 - A series is {name?, color?, values? | points? | grid?}; a link is {from, to, value}; an axis
   is {label?, min?, max?}.
 - A key is {at, ease?, ...fields it sets}; ease is linear, in_out, or step.
-- color is accent, red, yellow, green, or blue.
+- color is a theme color (accent, red, yellow, green, or blue) or any #rrggbb hex color.
 - Shapes and their objects reject fields they do not list.
 - An invalid drawing fails with the shape and rule it breaks; fix it and call again.
 
@@ -115,7 +119,25 @@ Shapes:
 - A line runs from (x, y) to (to_x, to_y).
 - A line's arrows puts a head on its start, end, or both ends.
 - A line's pattern makes it solid, dashed, or dotted.
-- A scene is a 3D view of cuboids, spheres, cylinders, lines, and triangle meshes; y points up.
+- A scene is a 3D view of solid objects, lines, and triangle meshes; y points up.
+- An ellipsoid is a sphere stretched to fill a box of size.
+- A tube curves smoothly through 2 to 64 points and has rounded ends.
+- A tube's radii gives each point its own radius, so the tube can swell and taper.
+- A tube's pouches (1 to 64) bulges it evenly along its length, like a large intestine.
+- A coil is one long tube tangled through a box of size, like a small intestine; it counts as
+  128 tube points.
+- A blob melts 1 to 48 balls into one smooth surface, for organic forms like organs or bodies.
+- A label pins text to a 3D point with a dot and leader line; it follows the point as the
+  scene turns and always shows in front.
+- Meshes shade smoothly across gentle bends and keep creases sharp.
+- plastic is smooth and shiny (the default), flesh is moist with fine bumps and mottling, and
+  glass is a see-through shell with bright edges.
+- background colors the scene's backdrop; a dark one such as #1d2b40 makes realistic colors
+  stand out.
+- For lifelike scenes, shape natural forms with blobs, tubes, and coils in realistic #rrggbb
+  colors and flesh material; give tubes radii or pouches; and keep cuboids for built things.
+- Tubes curve smoothly between their points, so 5 to 12 points describe most bends.
+- To show anatomy, wrap organs in a glass blob of the body and name parts with labels.
 - A scene's camera circles its objects by yaw and pitch in degrees and fits them in the frame.
 - Boxes, scenes, and text panels take a fill opacity from 0 to 1 and an optional border.
 - An outline with a faint fill highlights what is under a box; fill 1 covers it.
@@ -123,13 +145,15 @@ Shapes:
 - Text without a border shows its words in its color.
 - Boxes, lines, and scenes take a line_width, and text takes a size, both in logical units.
 - The defaults follow the window border and a 14-unit font.
-- Colors come from the user's theme. accent, the default, matches the focused window's border.
+- Theme colors follow the user's theme. accent, the default, matches the focused window's
+  border.
 
 Animation:
 - To animate a shape, give it keys. Each key has a time `at` in seconds and the values it sets.
 - Shape keys can set x, y, width, height, to_x, to_y, color, fill, opacity, line_width, size,
   text, and a scene's camera yaw and pitch.
-- Scene object keys can set center, size, radius, from, to, color, and rotation.
+- Scene object keys can set center, size, radius, radii, points, balls, from, to, color, and
+  rotation; label keys can set color.
 - rotation turns an object in degrees about the x, y, then z axis around its center.
 - A key's ease sets how fields move from their previous values: linear at constant speed (the
   default), in_out easing in and out, or step all at once when the key arrives.

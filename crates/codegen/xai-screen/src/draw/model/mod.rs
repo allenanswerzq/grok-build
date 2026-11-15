@@ -9,8 +9,9 @@ mod style;
 
 pub use animation::{Key, ObjectKey, Repeat, seconds};
 pub use chart::{Axis, Chart, Plot, Scale, Series};
-pub use shape::{Arrows, Camera, Color, Pattern, Point3, SceneObject, Shape};
-pub use style::{Palette, Rgb, Style};
+pub(crate) use shape::COIL_POINTS;
+pub use shape::{Arrows, Camera, Color, Material, Pattern, Point3, SceneObject, Shape};
+pub use style::{Palette, Rgb, Style, hex};
 
 use serde::Deserialize;
 
@@ -81,11 +82,11 @@ mod tests {
     }
 
     #[test]
-    fn shapes_take_theme_colors_and_reject_unknown_kinds_and_fields() {
+    fn shapes_take_theme_or_hex_colors_and_reject_unknown_kinds_and_fields() {
         let drawing = shapes(json!([
             {"kind": "box", "x": 104, "y": 82, "width": 120, "height": 36, "label": "Click Save"},
             {"kind": "line", "x": 400, "y": 300, "to_x": 230, "to_y": 100, "color": "red", "arrows": "end"},
-            {"kind": "text", "x": 420, "y": 300, "text": "Then choose\na folder"}
+            {"kind": "text", "x": 420, "y": 300, "text": "Then choose\na folder", "color": "#E8A0B4"}
         ]));
         assert!(matches!(
             drawing[0],
@@ -102,10 +103,18 @@ mod tests {
                 ..
             }
         ));
+        assert!(matches!(
+            drawing[2],
+            Shape::Text {
+                color: Color::Rgb([0xe8, 0xa0, 0xb4]),
+                ..
+            }
+        ));
         assert!(validate(&drawing).is_ok());
         for bad in [
             json!([{"kind": "circle", "x": 1, "y": 1}]),
-            json!([{"kind": "box", "x": 1, "y": 1, "width": 1, "height": 1, "color": "#ff0000"}]),
+            json!([{"kind": "box", "x": 1, "y": 1, "width": 1, "height": 1, "color": "pink"}]),
+            json!([{"kind": "box", "x": 1, "y": 1, "width": 1, "height": 1, "color": "#ff00"}]),
         ] {
             assert!(serde_json::from_value::<Vec<Shape>>(bad).is_err());
         }
@@ -179,6 +188,69 @@ mod tests {
         let flat = json!([{"kind": "cuboid", "center": [0, 0, 0], "size": [1, 0, 1]}]);
         assert!(error(validate(&scene(json!({}), flat))).contains("sizes must be positive"));
         assert!(error(validate(&scene(json!({}), json!([])))).contains("1 to 64 objects"));
+        let tube = |points: serde_json::Value, radii: serde_json::Value| {
+            scene(
+                json!({}),
+                json!([{"kind": "tube", "points": points, "radius": 0.2, "radii": radii}]),
+            )
+        };
+        let bend = json!([[0, 0, 0], [1, 1, 0], [2, 0, 1]]);
+        assert!(validate(&tube(bend.clone(), json!([0.1, 0.3, 0.1]))).is_ok());
+        assert!(error(validate(&tube(bend, json!([0.1])))).contains("one radius"));
+        assert!(error(validate(&tube(json!([[0, 0, 0]]), json!(null)))).contains("2 to 64"));
+        let bowel = |pouches: u32| {
+            scene(
+                json!({}),
+                json!([
+                    {"kind": "tube", "points": [[0, 0, 0], [4, 0, 0]], "radius": 0.5, "pouches": pouches},
+                    {"kind": "coil", "center": [0, 0, 0], "size": [3, 2, 1], "radius": 0.2},
+                ]),
+            )
+        };
+        assert!(validate(&bowel(12)).is_ok());
+        let swelling = scene(
+            json!({}),
+            json!([{
+                "kind": "tube", "points": [[0, 0, 0], [4, 0, 0]], "radius": 0.5,
+                "keys": [{"at": 1, "color": "red"}, {"at": 2, "radii": [0.5, 1]}],
+            }]),
+        );
+        assert!(validate(&swelling).is_ok());
+        assert!(error(validate(&bowel(0))).contains("pouches"));
+        let coils = scene(
+            json!({}),
+            json!([
+                {"kind": "coil", "center": [0, 0, 0], "size": [3, 2, 1], "radius": 0.2},
+            ])
+            .as_array()
+            .unwrap()
+            .iter()
+            .cycle()
+            .take(5)
+            .cloned()
+            .collect(),
+        );
+        assert!(error(validate(&coils)).contains("512 points"));
+        let blob = |balls: serde_json::Value| {
+            scene(
+                json!({}),
+                json!([{"kind": "blob", "balls": balls, "material": "flesh"}]),
+            )
+        };
+        assert!(validate(&blob(json!([[0, 0, 0, 1], [1, 0, 0, 0.5]]))).is_ok());
+        assert!(error(validate(&blob(json!([[0, 0, 0, 0]])))).contains("radius"));
+        assert!(error(validate(&blob(json!([])))).contains("1 to 48"));
+        let label = |text: &str| {
+            scene(
+                json!({}),
+                json!([
+                    {"kind": "sphere", "center": [0, 0, 0], "radius": 1, "material": "glass"},
+                    {"kind": "label", "point": [0, 1, 0], "text": text},
+                ]),
+            )
+        };
+        assert!(validate(&label("Liver")).is_ok());
+        assert!(validate(&label("")).is_err());
     }
 
     #[test]

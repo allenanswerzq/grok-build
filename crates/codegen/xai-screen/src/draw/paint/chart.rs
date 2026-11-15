@@ -594,7 +594,7 @@ impl Canvas<'_> {
                             sphere(
                                 &mut triangles,
                                 center,
-                                MARKER_RADIUS,
+                                Vec3::splat(MARKER_RADIUS),
                                 MARKER_SEGMENTS,
                                 color,
                             );

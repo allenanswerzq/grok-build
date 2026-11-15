@@ -104,6 +104,12 @@ pub struct ObjectKey {
     pub rotation: Option<Point3>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<Color>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub points: Option<Vec<Point3>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radii: Option<Vec<f64>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub balls: Option<Vec<[f64; 4]>>,
 }
 
 impl Repeat {
@@ -162,7 +168,7 @@ impl Tween for f64 {
     }
 }
 
-impl Tween for Point3 {
+impl<const N: usize> Tween for [f64; N] {
     fn tween(&self, to: &Self, share: f64) -> Self {
         std::array::from_fn(|axis| self[axis].tween(&to[axis], share))
     }
@@ -424,6 +430,11 @@ impl SceneObject {
         match self {
             Self::Cuboid { keys, .. }
             | Self::Sphere { keys, .. }
+            | Self::Ellipsoid { keys, .. }
+            | Self::Tube { keys, .. }
+            | Self::Coil { keys, .. }
+            | Self::Blob { keys, .. }
+            | Self::Label { keys, .. }
             | Self::Cylinder { keys, .. }
             | Self::Line { keys, .. }
             | Self::Mesh { keys, .. } => keys,
@@ -434,6 +445,11 @@ impl SceneObject {
         match self {
             Self::Cuboid { .. } => "cuboid",
             Self::Sphere { .. } => "sphere",
+            Self::Ellipsoid { .. } => "ellipsoid",
+            Self::Tube { .. } => "tube",
+            Self::Coil { .. } => "coil",
+            Self::Blob { .. } => "blob",
+            Self::Label { .. } => "label",
             Self::Cylinder { .. } => "cylinder",
             Self::Line { .. } => "line",
             Self::Mesh { .. } => "mesh",
@@ -450,13 +466,50 @@ impl SceneObject {
                 color,
                 rotation,
                 keys,
+                ..
             } => keyed!(keys, t: center, size, color, rotation = [0.0; 3]),
             Self::Sphere {
                 center,
                 radius,
                 color,
                 keys,
+                ..
             } => keyed!(keys, t: center, radius, color),
+            Self::Ellipsoid {
+                center,
+                size,
+                color,
+                rotation,
+                keys,
+                ..
+            } => keyed!(keys, t: center, size, color, rotation = [0.0; 3]),
+            Self::Tube {
+                points,
+                radius,
+                radii,
+                color,
+                rotation,
+                keys,
+                ..
+            } => keyed!(keys, t: points, radius, color, radii = vec![*radius; points.len()],
+                rotation = [0.0; 3]),
+            Self::Coil {
+                center,
+                size,
+                radius,
+                color,
+                rotation,
+                keys,
+                ..
+            } => keyed!(keys, t: center, size, radius, color, rotation = [0.0; 3]),
+            Self::Blob {
+                balls,
+                color,
+                rotation,
+                keys,
+                ..
+            } => keyed!(keys, t: balls, color, rotation = [0.0; 3]),
+            Self::Label { color, keys, .. } => keyed!(keys, t: color),
             Self::Cylinder {
                 from,
                 to,
@@ -464,6 +517,7 @@ impl SceneObject {
                 color,
                 rotation,
                 keys,
+                ..
             } => keyed!(keys, t: from, to, radius, color, rotation = [0.0; 3]),
             Self::Line {
                 from,
@@ -471,6 +525,7 @@ impl SceneObject {
                 color,
                 rotation,
                 keys,
+                ..
             } => keyed!(keys, t: from, to, color, rotation = [0.0; 3]),
             Self::Mesh {
                 color,
@@ -487,6 +542,11 @@ impl SceneObject {
         match self {
             Self::Cuboid { .. } => &["center", "size", "color", "rotation"],
             Self::Sphere { .. } => &["center", "radius", "color"],
+            Self::Ellipsoid { .. } => &["center", "size", "color", "rotation"],
+            Self::Tube { .. } => &["points", "radius", "radii", "color", "rotation"],
+            Self::Coil { .. } => &["center", "size", "radius", "color", "rotation"],
+            Self::Blob { .. } => &["balls", "color", "rotation"],
+            Self::Label { .. } => &["color"],
             Self::Cylinder { .. } => &["from", "to", "radius", "color", "rotation"],
             Self::Line { .. } => &["from", "to", "color", "rotation"],
             Self::Mesh { .. } => &["color", "rotation"],

@@ -9,11 +9,15 @@ use cosmic_text::{
 };
 use glam::{Vec2, vec2};
 
-use super::{Canvas, MAX_SIDE, rounded};
+use super::scene::Pin;
+use super::{Canvas, HALO, HALO_ALPHA, MAX_SIDE, circle, rounded};
 use crate::draw::gpu::{Image, Pipeline, Rect, Vertex, premultiply};
 use crate::draw::model::Rgb;
 
 const TAG_PADDING: Vec2 = vec2(8.0, 3.0);
+/// A scene label's dot radius, and the length of each leg of its leader line.
+const DOT: f32 = 3.5;
+const LEADER: f32 = 22.0;
 const PANEL_PADDING: Vec2 = vec2(12.0, 8.0);
 /// Labels and text wrap at this many times their font size.
 pub(super) const WRAP_EMS: f32 = 30.0;
@@ -40,6 +44,38 @@ impl Canvas<'_> {
         );
         let ink = self.style.palette.background;
         self.write(&text, vec2(tag.x, tag.y) + TAG_PADDING, ink);
+    }
+
+    /// A scene label: a dot on its point and a leader line out to its side, ending at its
+    /// text on a panel outlined in its color.
+    pub(super) fn pin(&mut self, pin: &Pin) {
+        self.alpha = pin.alpha;
+        let style = self.style;
+        let (size, line) = (style.font_size as f32, style.line_width as f32);
+        let text = self.layout(&pin.text, Weight::BOLD, size, WRAP_EMS * size);
+        let (ink, halo) = (
+            premultiply(pin.rgb, 255),
+            premultiply(style.palette.background, HALO_ALPHA),
+        );
+        let elbow = pin.at + vec2(pin.side, -1.0) * LEADER;
+        let end = elbow + vec2(pin.side * LEADER, 0.0);
+        let leader = [pin.at, elbow, end];
+        self.stroke(&leader, false, line + 2.0 * HALO, halo);
+        self.stroke(&leader, false, line, ink);
+        self.fill(&circle(pin.at, DOT + HALO), halo);
+        self.fill(&circle(pin.at, DOT), ink);
+        let size = text.size + 2.0 * TAG_PADDING;
+        let left = if pin.side < 0.0 {
+            end.x - size.x
+        } else {
+            end.x
+        };
+        let panel = panel_rect(vec2(left, end.y - size.y / 2.0), size, self.screen);
+        let outline = rounded(panel, style.rounding as f32);
+        self.fill(&outline, premultiply(style.palette.background, 235));
+        self.stroke(&outline, true, line, ink);
+        let at = vec2(panel.x, panel.y) + TAG_PADDING;
+        self.write(&text, at, style.palette.foreground);
     }
 
     /// A text note at `size` on a panel of `alpha` opacity: theme text inside an outline

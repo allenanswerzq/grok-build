@@ -43,8 +43,18 @@ impl Palette {
             Color::Yellow => self.yellow,
             Color::Green => self.green,
             Color::Blue => self.blue,
+            Color::Rgb(rgb) => rgb,
         }
     }
+}
+
+/// The RGB value of `#rrggbb`.
+pub fn hex(value: &str) -> Option<Rgb> {
+    let digits = value
+        .strip_prefix('#')
+        .filter(|digits| digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_hexdigit()))?;
+    let [_, r, g, b] = u32::from_str_radix(digits, 16).ok()?.to_be_bytes();
+    Some([r, g, b])
 }
 
 /// How drawings look. `xai-screen` reads it from the desktop on every draw, so theme changes

@@ -66,7 +66,7 @@ pub(super) struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
     color: [f32; 4],
-    /// Atlas texel, for glyphs.
+    /// Atlas texel, for glyphs. Lit vertices hold their material and its detail scale here.
     texel: [f32; 2],
 }
 
@@ -97,6 +97,16 @@ impl Vertex {
         self.position.into()
     }
 
+    /// A lit vertex's material, as the shader numbers it, and how many surface bumps fit in
+    /// one scene unit.
+    pub(super) fn set_material(&mut self, material: f32, detail: f32) {
+        self.texel = [material, detail];
+    }
+
+    pub(super) fn material(&self) -> f32 {
+        self.texel[0]
+    }
+
     /// The vertex at `alpha` of its opacity.
     pub(super) fn faded(mut self, alpha: f32) -> Self {
         self.color = self.color.map(|channel| channel * alpha);
@@ -117,6 +127,9 @@ pub(super) enum Pipeline {
     Solid,
     /// Lit and depth tested: 3D scenes.
     Lit,
+    /// See-through 3D surfaces, drawn back to front after a scene's solid ones. They test
+    /// depth without writing it, so they never hide each other.
+    Glass,
     /// Glyphs from the text atlas.
     Glyph,
 }
@@ -230,6 +243,7 @@ pub(super) struct Gpu {
     bindings: wgpu::BindGroupLayout,
     solid: wgpu::RenderPipeline,
     lit: wgpu::RenderPipeline,
+    glass: wgpu::RenderPipeline,
     glyph: wgpu::RenderPipeline,
 }
 
@@ -293,7 +307,7 @@ impl Gpu {
         let attributes = wgpu::vertex_attr_array![
             0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2
         ];
-        let pipeline = |fragment: &str, depth: wgpu::CompareFunction| {
+        let pipeline = |fragment: &str, depth: wgpu::CompareFunction, write: bool| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(fragment),
                 layout: Some(&layout),
@@ -310,7 +324,7 @@ impl Gpu {
                 primitive: wgpu::PrimitiveState::default(),
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH,
-                    depth_write_enabled: Some(depth != wgpu::CompareFunction::Always),
+                    depth_write_enabled: Some(write),
                     depth_compare: Some(depth),
                     stencil: Default::default(),
                     bias: Default::default(),
@@ -333,9 +347,10 @@ impl Gpu {
                 cache: None,
             })
         };
-        let solid = pipeline("solid", wgpu::CompareFunction::Always);
-        let lit = pipeline("lit", wgpu::CompareFunction::Less);
-        let glyph = pipeline("glyph", wgpu::CompareFunction::Always);
+        let solid = pipeline("solid", wgpu::CompareFunction::Always, false);
+        let lit = pipeline("lit", wgpu::CompareFunction::Less, true);
+        let glass = pipeline("glass", wgpu::CompareFunction::Less, false);
+        let glyph = pipeline("glyph", wgpu::CompareFunction::Always, false);
         Ok(Self {
             instance,
             adapter,
@@ -344,6 +359,7 @@ impl Gpu {
             bindings,
             solid,
             lit,
+            glass,
             glyph,
         })
     }
@@ -486,6 +502,7 @@ impl Gpu {
                 pass.set_pipeline(match draw.pipeline {
                     Pipeline::Solid => &self.solid,
                     Pipeline::Lit => &self.lit,
+                    Pipeline::Glass => &self.glass,
                     Pipeline::Glyph => &self.glyph,
                 });
                 // The instance index selects the draw's camera.

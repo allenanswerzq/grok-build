@@ -12,7 +12,7 @@ use anyhow::{Context, Result, anyhow, ensure};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 
-use crate::draw::model::{Palette, Rgb, Style};
+use crate::draw::model::{Palette, Style, hex};
 
 const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_QUERY: u64 = 1024 * 1024;
@@ -241,14 +241,6 @@ fn parse_palette(colors: &str) -> Palette {
         *slot = rgb;
     }
     palette
-}
-
-fn hex(value: &str) -> Option<Rgb> {
-    let digits = value
-        .strip_prefix('#')
-        .filter(|digits| digits.len() == 6 && digits.bytes().all(|b| b.is_ascii_hexdigit()))?;
-    let [_, r, g, b] = u32::from_str_radix(digits, 16).ok()?.to_be_bytes();
-    Some([r, g, b])
 }
 
 /// Run a desktop program and return what it prints. It is killed when it runs past

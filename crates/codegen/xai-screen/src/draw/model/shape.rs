@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Chart, Key, ObjectKey, Style};
+use super::{Chart, Key, ObjectKey, Rgb, Style, hex};
 
 pub(crate) const MAX_SHAPES: usize = 64;
 const MAX_TEXT_CHARS: usize = 200;
@@ -10,6 +10,15 @@ const MAX_COORDINATE: f64 = 100_000.0;
 const MAX_SCENE_OBJECTS: usize = 64;
 /// Limit for the vertices, and separately the faces, of all meshes in one scene.
 const MAX_MESH_SIZE: usize = 2_000;
+/// Limit for the balls of one blob.
+const MAX_BLOB_BALLS: usize = 48;
+/// Limits for one tube's points, and for all tube points in one scene.
+const MAX_TUBE_POINTS: usize = 64;
+const MAX_SCENE_TUBE_POINTS: usize = 512;
+/// A coil is one tube through this many points, and counts them toward a scene's limit.
+pub(crate) const COIL_POINTS: usize = 128;
+/// Limit for a tube's pouches.
+const MAX_POUCHES: u32 = 64;
 /// Default fill opacities: a faint tint for boxes and nearly solid backdrops for scenes and
 /// text.
 const BOX_FILL: f64 = 0.08;
@@ -124,6 +133,9 @@ pub enum Shape {
         /// is the window border width.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         line_width: Option<f64>,
+        /// The backdrop's color. The default is the theme background.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        background: Option<Color>,
         #[serde(default)]
         camera: Camera,
         objects: Vec<SceneObject>,
@@ -174,6 +186,8 @@ pub enum SceneObject {
         size: Point3,
         #[serde(default)]
         color: Color,
+        #[serde(default)]
+        material: Material,
         /// Degrees to turn about the x, y, then z axis, around the object's center.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotation: Option<Point3>,
@@ -186,6 +200,44 @@ pub enum SceneObject {
         radius: f64,
         #[serde(default)]
         color: Color,
+        #[serde(default)]
+        material: Material,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
+    },
+    /// A sphere stretched to fill a box of `size`.
+    Ellipsoid {
+        center: Point3,
+        size: Point3,
+        #[serde(default)]
+        color: Color,
+        #[serde(default)]
+        material: Material,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
+    },
+    /// A smooth round tube that curves through `points`, with rounded ends.
+    Tube {
+        points: Vec<Point3>,
+        radius: f64,
+        /// A radius for each point, in place of `radius`, so the tube can swell and taper.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        radii: Option<Vec<f64>>,
+        /// Bulges spaced evenly along the tube, pinched between, like a large intestine.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        pouches: Option<u32>,
+        #[serde(default)]
+        color: Color,
+        #[serde(default)]
+        material: Material,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
         /// Values the object moves to over time.
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keys: Vec<ObjectKey>,
@@ -197,6 +249,8 @@ pub enum SceneObject {
         radius: f64,
         #[serde(default)]
         color: Color,
+        #[serde(default)]
+        material: Material,
         /// Degrees to turn about the x, y, then z axis, around the object's center.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotation: Option<Point3>,
@@ -216,12 +270,16 @@ pub enum SceneObject {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keys: Vec<ObjectKey>,
     },
-    /// Triangles; each face lists three indices into `vertices`.
-    Mesh {
-        vertices: Vec<Point3>,
-        faces: Vec<[usize; 3]>,
+    /// One long tube that tangles through a box of `size`, like a small intestine or a
+    /// heap of rope.
+    Coil {
+        center: Point3,
+        size: Point3,
+        radius: f64,
         #[serde(default)]
         color: Color,
+        #[serde(default)]
+        material: Material,
         /// Degrees to turn about the x, y, then z axis, around the object's center.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         rotation: Option<Point3>,
@@ -229,6 +287,59 @@ pub enum SceneObject {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         keys: Vec<ObjectKey>,
     },
+    /// Balls that melt into one smooth surface where they meet. Each ball is [x, y, z, radius].
+    Blob {
+        balls: Vec<[f64; 4]>,
+        #[serde(default)]
+        color: Color,
+        #[serde(default)]
+        material: Material,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
+    },
+    /// Text pinned to a 3D point by a dot and a leader line. It follows the point as the scene
+    /// turns and always shows in front.
+    Label {
+        point: Point3,
+        text: String,
+        #[serde(default)]
+        color: Color,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
+    },
+    /// Triangles; each face lists three indices into `vertices`.
+    Mesh {
+        vertices: Vec<Point3>,
+        faces: Vec<[usize; 3]>,
+        #[serde(default)]
+        color: Color,
+        #[serde(default)]
+        material: Material,
+        /// Degrees to turn about the x, y, then z axis, around the object's center.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        rotation: Option<Point3>,
+        /// Values the object moves to over time.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        keys: Vec<ObjectKey>,
+    },
+}
+
+/// How a solid scene object's surface looks. The shader numbers materials in this order.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Material {
+    /// Smooth and lightly glossy.
+    #[default]
+    Plastic,
+    /// Living tissue: moist, softly lit from within, with a fine bumpy surface.
+    Flesh,
+    /// A see-through shell, clear where it faces the camera and denser toward its edges.
+    Glass,
 }
 
 /// The ends of a line that get an arrowhead: "end" points at (to_x, to_y).
@@ -262,9 +373,10 @@ pub enum Pattern {
     Dotted,
 }
 
-/// A color of the current Omarchy theme. `accent` matches the focused window's border.
+/// A color of the current Omarchy theme, or any color as `#rrggbb`. `accent` matches the
+/// focused window's border.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(try_from = "String", into = "String")]
 pub enum Color {
     #[default]
     Accent,
@@ -272,6 +384,37 @@ pub enum Color {
     Yellow,
     Green,
     Blue,
+    Rgb(Rgb),
+}
+
+impl TryFrom<String> for Color {
+    type Error = String;
+
+    fn try_from(name: String) -> Result<Self, String> {
+        Ok(match name.as_str() {
+            "accent" => Self::Accent,
+            "red" => Self::Red,
+            "yellow" => Self::Yellow,
+            "green" => Self::Green,
+            "blue" => Self::Blue,
+            _ => Self::Rgb(hex(&name).ok_or_else(|| {
+                format!("unknown color {name:?}: use accent, red, yellow, green, blue, or #rrggbb")
+            })?),
+        })
+    }
+}
+
+impl From<Color> for String {
+    fn from(color: Color) -> Self {
+        match color {
+            Color::Accent => "accent".to_owned(),
+            Color::Red => "red".to_owned(),
+            Color::Yellow => "yellow".to_owned(),
+            Color::Green => "green".to_owned(),
+            Color::Blue => "blue".to_owned(),
+            Color::Rgb([r, g, b]) => format!("#{r:02x}{g:02x}{b:02x}"),
+        }
+    }
 }
 
 impl Shape {
@@ -432,15 +575,22 @@ impl Shape {
                 if objects.is_empty() || objects.len() > MAX_SCENE_OBJECTS {
                     return Err("a scene needs 1 to 64 objects");
                 }
-                let (vertices, faces) =
-                    objects.iter().fold((0, 0), |(v, f), object| match object {
-                        SceneObject::Mesh {
-                            vertices, faces, ..
-                        } => (v + vertices.len(), f + faces.len()),
-                        _ => (v, f),
-                    });
+                let (vertices, faces, points) =
+                    objects
+                        .iter()
+                        .fold((0, 0, 0), |(v, f, p), object| match object {
+                            SceneObject::Mesh {
+                                vertices, faces, ..
+                            } => (v + vertices.len(), f + faces.len(), p),
+                            SceneObject::Tube { points, .. } => (v, f, p + points.len()),
+                            SceneObject::Coil { .. } => (v, f, p + COIL_POINTS),
+                            _ => (v, f, p),
+                        });
                 if vertices > MAX_MESH_SIZE || faces > MAX_MESH_SIZE {
                     return Err("a scene's meshes may use at most 2000 vertices and 2000 faces");
+                }
+                if points > MAX_SCENE_TUBE_POINTS {
+                    return Err("a scene's tubes may use at most 512 points");
                 }
                 objects.iter().try_for_each(SceneObject::check)?;
                 label
@@ -458,37 +608,108 @@ impl SceneObject {
     pub fn rotation(&self) -> Option<Point3> {
         match *self {
             Self::Cuboid { rotation, .. }
+            | Self::Blob { rotation, .. }
+            | Self::Ellipsoid { rotation, .. }
+            | Self::Tube { rotation, .. }
+            | Self::Coil { rotation, .. }
             | Self::Cylinder { rotation, .. }
             | Self::Line { rotation, .. }
             | Self::Mesh { rotation, .. } => rotation,
-            Self::Sphere { .. } => None,
+            Self::Sphere { .. } | Self::Label { .. } => None,
+        }
+    }
+
+    /// How the object's surface looks. Lines and labels are plastic.
+    pub fn material(&self) -> Material {
+        match *self {
+            Self::Cuboid { material, .. }
+            | Self::Sphere { material, .. }
+            | Self::Ellipsoid { material, .. }
+            | Self::Cylinder { material, .. }
+            | Self::Tube { material, .. }
+            | Self::Coil { material, .. }
+            | Self::Blob { material, .. }
+            | Self::Mesh { material, .. } => material,
+            Self::Line { .. } | Self::Label { .. } => Material::Plastic,
         }
     }
 
     pub(crate) fn check(&self) -> Result<(), &'static str> {
         let mut numbers: Vec<f64> = match self {
-            Self::Cuboid { center, size, .. } => center.iter().chain(size).copied().collect(),
+            Self::Cuboid { center, size, .. } | Self::Ellipsoid { center, size, .. } => {
+                center.iter().chain(size).copied().collect()
+            }
+            Self::Tube {
+                points,
+                radius,
+                radii,
+                ..
+            } => (points.iter().flatten().chain([radius]))
+                .chain(radii.iter().flatten())
+                .copied()
+                .collect(),
             Self::Sphere { center, radius, .. } => center.iter().chain([radius]).copied().collect(),
+            Self::Coil {
+                center,
+                size,
+                radius,
+                ..
+            } => center.iter().chain(size).chain([radius]).copied().collect(),
             Self::Cylinder {
                 from, to, radius, ..
             } => from.iter().chain(to).chain([radius]).copied().collect(),
             Self::Line { from, to, .. } => from.iter().chain(to).copied().collect(),
             Self::Mesh { vertices, .. } => vertices.iter().flatten().copied().collect(),
+            Self::Blob { balls, .. } => balls.iter().flatten().copied().collect(),
+            Self::Label { point, .. } => point.to_vec(),
         };
         numbers.extend(self.rotation().into_iter().flatten());
         if !numbers.into_iter().all(finite) {
             return Err("3D coordinates must be finite numbers");
         }
         match self {
-            Self::Cuboid { size, .. } if size.iter().any(|side| *side <= 0.0) => {
-                Err("cuboid sizes must be positive")
+            Self::Cuboid { size, .. } | Self::Ellipsoid { size, .. } | Self::Coil { size, .. }
+                if size.iter().any(|side| *side <= 0.0) =>
+            {
+                Err("sizes must be positive")
             }
-            Self::Sphere { radius, .. } | Self::Cylinder { radius, .. } if *radius <= 0.0 => {
+            Self::Tube { points, .. } if !(2..=MAX_TUBE_POINTS).contains(&points.len()) => {
+                Err("a tube needs 2 to 64 points")
+            }
+            Self::Tube { points, radii, .. }
+                if radii
+                    .as_ref()
+                    .is_some_and(|radii| radii.len() != points.len()) =>
+            {
+                Err("a tube needs one radius in radii for each point")
+            }
+            Self::Tube { radius, radii, .. }
+                if *radius <= 0.0 || radii.iter().flatten().any(|radius| *radius <= 0.0) =>
+            {
+                Err("radius must be positive")
+            }
+            Self::Tube { pouches, .. }
+                if pouches.is_some_and(|pouches| !(1..=MAX_POUCHES).contains(&pouches)) =>
+            {
+                Err("a tube's pouches must be 1 to 64")
+            }
+            Self::Sphere { radius, .. }
+            | Self::Cylinder { radius, .. }
+            | Self::Coil { radius, .. }
+                if *radius <= 0.0 =>
+            {
                 Err("radius must be positive")
             }
             Self::Cylinder { from, to, .. } | Self::Line { from, to, .. } if from == to => {
                 Err("from and to must differ")
             }
+            Self::Blob { balls, .. } if !(1..=MAX_BLOB_BALLS).contains(&balls.len()) => {
+                Err("a blob needs 1 to 48 balls")
+            }
+            Self::Blob { balls, .. } if balls.iter().any(|ball| ball[3] <= 0.0) => {
+                Err("radius must be positive")
+            }
+            Self::Label { text, .. } => check_text(text, false),
             Self::Mesh { faces, .. } if faces.is_empty() => Err("a mesh needs at least one face"),
             Self::Mesh {
                 vertices, faces, ..

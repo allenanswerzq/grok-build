@@ -22,6 +22,7 @@ mod scene;
 mod text;
 
 pub(super) use scene::View;
+use scene::{Blobs, Pin};
 use text::Atlas;
 
 use super::gpu::{Frame, Gpu, Pipeline, Rect, Target, Vertex, premultiply};
@@ -37,10 +38,11 @@ const CIRCLE_SEGMENTS: usize = 32;
 /// Sharp corners extend at most this many half widths.
 const MITER_LIMIT: f32 = 4.0;
 
-/// Paints drawings. Keeps the fonts, glyph cache, and GPU between drawings.
+/// Paints drawings. Keeps the fonts, glyph cache, blob surfaces, and GPU between drawings.
 pub(crate) struct Painter {
     fonts: FontSystem,
     glyphs: SwashCache,
+    blobs: Blobs,
     gpu: Option<Gpu>,
 }
 
@@ -49,6 +51,7 @@ impl Painter {
         Self {
             fonts: FontSystem::new(),
             glyphs: SwashCache::new(),
+            blobs: Blobs::default(),
             gpu: None,
         }
     }
@@ -101,6 +104,8 @@ impl Painter {
             atlas: Atlas::default(),
             fonts: &mut self.fonts,
             glyphs: &mut self.glyphs,
+            blobs: &mut self.blobs,
+            pins: Vec::new(),
             style,
             views,
             screen: vec2(size.0 as f32, size.1 as f32),
@@ -123,6 +128,9 @@ struct Canvas<'a> {
     atlas: Atlas,
     fonts: &'a mut FontSystem,
     glyphs: &'a mut SwashCache,
+    blobs: &'a mut Blobs,
+    /// Scene labels, drawn with the text.
+    pins: Vec<Pin>,
     style: &'a Style,
     /// Each scene's view after the user's orbiting and zooming, in scene order.
     views: &'a [View],
@@ -196,11 +204,13 @@ impl Canvas<'_> {
                     camera,
                     objects,
                     border,
+                    background,
                     ..
                 } => {
                     let frame = rect(*x, *y, *width, *height);
                     let outline = rounded(frame, style.rounding as f32);
-                    self.fill(&outline, premultiply(palette.background, fill));
+                    let backdrop = background.map_or(palette.background, |name| palette.rgb(name));
+                    self.fill(&outline, premultiply(backdrop, fill));
                     if *border {
                         self.stroke(&outline, true, line, premultiply(palette.accent, 255));
                     }
@@ -210,6 +220,9 @@ impl Canvas<'_> {
                 }
                 Shape::Chart(chart) => self.chart(chart, orbit),
             }
+        }
+        for pin in std::mem::take(&mut self.pins) {
+            self.pin(&pin);
         }
         for shape in shapes {
             self.alpha = shape.opacity() as f32;

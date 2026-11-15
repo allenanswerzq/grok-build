@@ -6,8 +6,9 @@
 //!
 //! Each case is exactly what a model would send to `screen_draw`: a `shapes` list, or the
 //! whole input when it also sets `repeat`. It is printed in the terminal while it is on
-//! screen; only the caption at the top is added. Cases 12 to 21 animate, and cases 22 to 31
-//! chart data. The cases fit a monitor of 1280 × 800 logical units.
+//! screen; only the caption at the top is added. Cases 12 to 21 animate, cases 22 to 31
+//! chart data, and case 32 is a lifelike 3D scene. The cases fit a monitor of 1280 × 800
+//! logical units.
 //!
 //! ```sh
 //! just build xai-screen
@@ -30,7 +31,7 @@ use xai_tool_runtime::{Tool, ToolCallContext};
 /// A caption and the drawing it shows.
 type Case = (&'static str, fn() -> Value);
 
-const CASES: [Case; 31] = [
+const CASES: [Case; 32] = [
     ("Box colors", case_1_box_colors),
     ("Box fill and border", case_2_box_fill_and_border),
     ("Lines and arrows", case_3_lines_and_arrows),
@@ -74,6 +75,7 @@ const CASES: [Case; 31] = [
     ("Changing data", case_29_changing_data),
     ("Candlestick", case_30_candlestick),
     ("Sankey", case_31_sankey),
+    ("Digestive system", case_32_digestive_system),
 ];
 
 /// Every theme color. A box's label sits just above it.
@@ -1243,6 +1245,113 @@ fn case_31_sankey() -> Value {
         },
     ])
 }
+
+/// A lifelike scene written as plain JSON, the way a model would: flesh organs melted from
+/// blobs, a pouched large intestine, and a coiled small intestine inside a glass body, named
+/// by 3D labels that follow them as the body turns. Drag it to look around, and scroll to zoom.
+fn case_32_digestive_system() -> Value {
+    serde_json::from_str(DIGESTIVE_SYSTEM).expect("case 32 is valid JSON")
+}
+
+const DIGESTIVE_SYSTEM: &str = r##"{
+    "shapes": [
+        {
+            "kind": "scene", "x": 290, "y": 70, "width": 700, "height": 715,
+            "background": "#1f3048", "fill": 1, "border": false,
+            "camera": { "yaw": -18, "pitch": 4 },
+            "keys": [{ "at": 12, "yaw": 18, "ease": "in_out" }],
+            "objects": [
+                {
+                    "kind": "blob", "color": "#8fbfff", "material": "glass",
+                    "balls": [
+                        [0, 13, -0.3, 1.4], [0, 11.5, -0.2, 1.6],
+                        [-6.4, 9.6, -0.5, 1.7], [6.4, 9.6, -0.5, 1.7],
+                        [-7.4, 7.6, -0.5, 1.4], [7.4, 7.6, -0.5, 1.4],
+                        [-3.4, 8.8, 0, 3.2], [3.4, 8.8, 0, 3.2], [0, 8.4, 0.3, 3.3],
+                        [-3.3, 4.8, 0, 3.4], [3.3, 4.8, 0, 3.4], [0, 4.8, 0.5, 3.5],
+                        [-2.9, 0.8, 0, 3.3], [2.9, 0.8, 0, 3.3], [0, 0.8, 0.6, 3.4],
+                        [-2.8, -3.2, 0, 3.3], [2.8, -3.2, 0, 3.3], [0, -3.2, 0.7, 3.4],
+                        [-3.8, -7.2, 0, 3.4], [3.8, -7.2, 0, 3.4], [0, -7.5, 0.4, 3.4],
+                        [-4, -10.6, 0, 2.8], [4, -10.6, 0, 2.8], [0, -11, -0.3, 2.5]
+                    ]
+                },
+                {
+                    "kind": "tube", "radius": 0.32, "color": "#cf7f73", "material": "flesh",
+                    "points": [[0, 12.6, -1], [0, 9, -1], [0.2, 6.2, -0.8], [0.8, 4.8, -0.4], [1.4, 4.6, 0]]
+                },
+                {
+                    "kind": "blob", "color": "#e8998a", "material": "flesh",
+                    "balls": [
+                        [1.4, 4.8, 0, 0.8], [2.5, 5, 0, 1.2], [3.4, 4.3, 0, 1.5], [3.8, 3.1, 0.1, 1.6],
+                        [3.5, 1.9, 0.2, 1.5], [2.7, 1.1, 0.3, 1.2], [1.7, 0.8, 0.3, 0.9], [0.8, 0.9, 0.3, 0.6]
+                    ]
+                },
+                {
+                    "kind": "tube", "radius": 0.5, "color": "#e6b84f", "material": "flesh",
+                    "points": [[-0.4, -0.9, -0.2], [0.8, -0.9, -0.3], [2, -0.6, -0.5], [3.2, -0.1, -0.6], [4.3, 0.6, -0.8]],
+                    "radii": [0.62, 0.5, 0.46, 0.4, 0.3]
+                },
+                {
+                    "kind": "tube", "radius": 0.42, "color": "#f2a897", "material": "flesh",
+                    "points": [[0.6, 0.9, 0.3], [-0.5, 0.6, 0.2], [-1.1, -0.2, 0], [-1.1, -1.2, 0], [-0.4, -1.7, 0], [0.6, -1.6, 0], [1.2, -1.3, 0]]
+                },
+                {
+                    "kind": "blob", "color": "#8f3b2c", "material": "flesh",
+                    "balls": [
+                        [-3.3, 4.3, 0.4, 2.4], [-1.2, 4.6, 0.6, 2], [0.7, 4.6, 0.9, 1.4], [2, 4.4, 1, 0.9],
+                        [-4.1, 2.8, 0.3, 2], [-2.4, 2.8, 0.8, 1.8], [-0.6, 3.4, 1, 1.3]
+                    ]
+                },
+                {
+                    "kind": "blob", "color": "#3f7d3a", "material": "flesh",
+                    "balls": [[-1.7, 0.8, 1.7, 0.5], [-1.9, 1.3, 1.5, 0.45], [-2.1, 1.8, 1.3, 0.35]]
+                },
+                {
+                    "kind": "ellipsoid", "center": [0, -5.7, -1.8], "size": [7.6, 6.6, 2.4],
+                    "color": "#b4645a", "material": "flesh"
+                },
+                {
+                    "kind": "coil", "center": [0, -5.8, 0.5], "size": [6.6, 5.6, 2.2], "radius": 0.44,
+                    "color": "#f2a897", "material": "flesh"
+                },
+                {
+                    "kind": "tube", "radius": 0.86, "pouches": 22, "color": "#df9a72", "material": "flesh",
+                    "points": [
+                        [-4.3, -8.3, 0.4], [-4.4, -5.5, 0.4], [-4.4, -2.6, 0.5], [-4, -1.3, 0.9],
+                        [-2.4, -2.1, 1.7], [0, -2.8, 2], [2.4, -2, 1.7], [4, -0.7, 1],
+                        [4.6, -1.8, 0.5], [4.6, -4.4, 0.4], [4.4, -7, 0.4]
+                    ]
+                },
+                {
+                    "kind": "tube", "radius": 0.6, "color": "#df9a72", "material": "flesh",
+                    "points": [[4.4, -7, 0.4], [4, -8.3, 0.5], [2.8, -9, 0.8], [1.4, -8.6, 0.6], [0.3, -9.4, 0.1], [0, -10.6, -0.3], [0, -11.8, -0.3]],
+                    "radii": [0.66, 0.62, 0.6, 0.58, 0.6, 0.55, 0.32]
+                },
+                {
+                    "kind": "tube", "radius": 0.16, "color": "#df9a72", "material": "flesh",
+                    "points": [[-4.1, -8.9, 0.6], [-3.6, -9.7, 0.8], [-3, -9.9, 0.7]]
+                },
+                { "kind": "label", "point": [0.3, 8, -0.6], "text": "Esophagus", "color": "#e8a59b" },
+                { "kind": "label", "point": [-3.8, 4.4, 2.2], "text": "Liver", "color": "#d0705c" },
+                { "kind": "label", "point": [3.9, 3, 1.6], "text": "Stomach", "color": "#f2b3a6" },
+                { "kind": "label", "point": [-1.8, 0.8, 2.2], "text": "Gallbladder", "color": "#7cc46a" },
+                { "kind": "label", "point": [3.6, 0.2, -0.3], "text": "Pancreas", "color": "#f0cc6c" },
+                { "kind": "label", "point": [1.2, -5, 1.5], "text": "Small intestine", "color": "#f6bcae" },
+                { "kind": "label", "point": [-4.4, -4.5, 1.2], "text": "Large intestine", "color": "#eab08e" },
+                { "kind": "label", "point": [0, -11.4, 0.2], "text": "Rectum", "color": "#eab08e" }
+            ]
+        },
+        {
+            "kind": "text", "x": 40, "y": 130,
+            "text": "Human digestive system", "size": 26, "border": false
+        },
+        {
+            "kind": "text", "x": 40, "y": 172,
+            "text": "Food takes 1 to 3 days to pass through", "border": false
+        }
+    ],
+    "repeat": "bounce"
+}"##;
 
 /// A repeatable number from 0 to 1 for `seed`, so the example data stays the same.
 fn noise(seed: f64) -> f64 {
