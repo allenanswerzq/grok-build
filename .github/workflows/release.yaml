@@ -68,10 +68,12 @@ jobs:
           fi
 
           asset_base="grok-lean-${release_tag}-${TARGET}"
+          source_commit="$(git rev-parse HEAD)"
           {
             echo "RELEASE_TAG=$release_tag"
             echo "RELEASE_VERSION=$release_version"
             echo "ASSET_BASE=$asset_base"
+            echo "SOURCE_COMMIT=$source_commit"
           } >> "$GITHUB_ENV"
 
       - name: Install system dependencies
@@ -154,7 +156,7 @@ jobs:
           )
 
           cat > "$dist/RELEASE_NOTES.md" <<EOF
-          Linux x86_64 build of grok-lean $RELEASE_VERSION from commit $GITHUB_SHA.
+          Linux x86_64 build of grok-lean $RELEASE_VERSION from commit $SOURCE_COMMIT.
 
           Download either the standalone binary or the tarball, then verify it with SHA256SUMS:
 

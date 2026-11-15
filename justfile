@@ -28,6 +28,76 @@ build-lean-debug *flags:
     cargo build -p grok-lean --locked -j {{ jobs }} "$@"
     @ls -lh target/debug/grok-lean
 
+# Bump grok-lean, commit it, then push a matching tag to start the GitHub release.
+release-lean version:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    release_version="${1#v}"
+    release_tag="v$release_version"
+    if [[ ! "$release_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.-]+)?$ ]]; then
+        echo "Version must look like 0.1.1 or v0.1.1." >&2
+        exit 1
+    fi
+
+    if [[ "$(git branch --show-current)" != "main" ]]; then
+        echo "Release from main." >&2
+        exit 1
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "Commit or stash your changes before releasing." >&2
+        exit 1
+    fi
+
+    git fetch origin main --tags
+    if [[ "$(git rev-parse HEAD)" != "$(git rev-parse origin/main)" ]]; then
+        echo "Local main must match origin/main before releasing." >&2
+        exit 1
+    fi
+    if git rev-parse -q --verify "refs/tags/$release_tag" >/dev/null; then
+        echo "Tag $release_tag already exists." >&2
+        exit 1
+    fi
+
+    current_version="$(sed -n 's/^version = "\(.*\)"/\1/p' crates/codegen/grok-lean/Cargo.toml | head -n1)"
+    if [[ "$current_version" != "$release_version" ]]; then
+        RELEASE_VERSION="$release_version" python3 - <<'PY'
+    import os
+    import re
+    from pathlib import Path
+
+    version = os.environ["RELEASE_VERSION"]
+
+    manifest = Path("crates/codegen/grok-lean/Cargo.toml")
+    text = manifest.read_text()
+    text, count = re.subn(r'(?m)^version = "[^"]+"$', f'version = "{version}"', text, count=1)
+    if count != 1:
+        raise SystemExit("Could not update grok-lean version in Cargo.toml.")
+    manifest.write_text(text)
+
+    lock = Path("Cargo.lock")
+    text = lock.read_text()
+    text, count = re.subn(
+        r'(\[\[package\]\]\nname = "grok-lean"\nversion = ")[^"]+(")',
+        rf"\g<1>{version}\2",
+        text,
+        count=1,
+    )
+    if count != 1:
+        raise SystemExit("Could not update grok-lean version in Cargo.lock.")
+    lock.write_text(text)
+    PY
+        cargo metadata --locked --format-version 1 --no-deps >/dev/null
+        git add crates/codegen/grok-lean/Cargo.toml Cargo.lock
+        git commit -m "[build] Release grok-lean $release_tag"
+        git push origin main
+    fi
+
+    git tag -a "$release_tag" -m "grok-lean $release_tag"
+    git push origin "$release_tag"
+    echo "Release workflow started for $release_tag."
+    echo "Watch it with: gh run list --repo allenanswerzq/grok-build --workflow release.yaml --limit 1"
+
 # Build the CLI, then launch the TUI with any TUI arguments.
 run *args: build
     ./target/debug/xai-grok-pager "$@"
