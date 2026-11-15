@@ -2702,12 +2702,7 @@ impl SessionActor {
                 (title, acp::ToolKind::Other, vec![], vec![])
             }
             #[allow(unreachable_patterns)]
-            _ => (
-                wire_name.to_string(),
-                acp::ToolKind::Other,
-                vec![],
-                vec![],
-            ),
+            _ => (wire_name.to_string(), acp::ToolKind::Other, vec![], vec![]),
         };
         if let Some(access) = self
             .agent

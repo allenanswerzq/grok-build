@@ -9,7 +9,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{Chart, Color, Point3, SceneObject, Series, Shape, Style};
+use super::{Camera, Chart, Color, Point3, SceneObject, Series, Shape, Style};
 
 /// The longest timeline, and the most keys on one shape or object.
 const MAX_SECONDS: f64 = 60.0;
@@ -42,8 +42,8 @@ pub enum Ease {
 }
 
 /// Values some of a shape's fields reach `at` seconds in. A key sets only fields its shape
-/// has; `yaw` and `pitch` turn a scene's or chart's camera, and `series` replaces a chart's
-/// data.
+/// has, written the same way: `camera` turns a scene's or chart's camera, and `series`
+/// replaces a chart's data.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Key {
@@ -75,11 +75,19 @@ pub struct Key {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera: Option<CameraKey>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub series: Option<Vec<Series>>,
+}
+
+/// The camera angles a key turns to; it may set either or both.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CameraKey {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub yaw: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pitch: Option<f64>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub series: Option<Vec<Series>>,
 }
 
 /// Values some of a scene object's fields reach `at` seconds in. A key sets only fields its
@@ -232,6 +240,16 @@ fn track_or<K: Timed, T: Tween>(
     }
 }
 
+/// Turn `camera` to time `t` through the keys that set its angles.
+fn track_camera(camera: &mut Camera, keys: &[Key], t: f64) {
+    track(&mut camera.yaw, keys, t, |key| {
+        key.camera.as_ref()?.yaw.as_ref()
+    });
+    track(&mut camera.pitch, keys, t, |key| {
+        key.camera.as_ref()?.pitch.as_ref()
+    });
+}
+
 /// Move each named field to time `t` through `keys`. `field = default` names an optional
 /// field and the value it starts from when unset.
 macro_rules! keyed {
@@ -332,8 +350,7 @@ impl Shape {
             } => {
                 keyed!(keys, t: x, y, width, height, fill = self.fill(),
                     line_width = self.line_width(style), opacity = 1.0);
-                track(&mut camera.yaw, &keys[..], t, |key| key.yaw.as_ref());
-                track(&mut camera.pitch, &keys[..], t, |key| key.pitch.as_ref());
+                track_camera(camera, keys, t);
                 for object in objects.iter_mut() {
                     *object = object.at(t);
                 }
@@ -381,8 +398,7 @@ impl Shape {
                 "fill",
                 "opacity",
                 "line_width",
-                "yaw",
-                "pitch",
+                "camera",
             ],
             Self::Chart(_) => &[
                 "x",
@@ -392,8 +408,7 @@ impl Shape {
                 "fill",
                 "opacity",
                 "line_width",
-                "yaw",
-                "pitch",
+                "camera",
                 "series",
             ],
         }
@@ -419,8 +434,7 @@ impl Chart {
         } = &mut chart;
         keyed!(keys, t: x, y, width, height, series, fill = self.fill(),
             line_width = self.line_width(style), opacity = 1.0);
-        track(&mut camera.yaw, &keys[..], t, |key| key.yaw.as_ref());
-        track(&mut camera.pitch, &keys[..], t, |key| key.pitch.as_ref());
+        track_camera(camera, keys, t);
         chart
     }
 }

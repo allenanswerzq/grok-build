@@ -7,7 +7,7 @@ mod chart;
 mod shape;
 mod style;
 
-pub use animation::{Key, ObjectKey, Repeat, seconds};
+pub use animation::{CameraKey, Key, ObjectKey, Repeat, seconds};
 pub use chart::{Axis, Chart, Plot, Scale, Series};
 pub(crate) use shape::COIL_POINTS;
 pub use shape::{Arrows, Camera, Color, Material, Pattern, Point3, SceneObject, Shape};
@@ -313,6 +313,17 @@ mod tests {
         assert!(error(validate(&backward)).contains("key times must rise"));
         let opaque = line(json!([{"at": 1, "opacity": 2}]));
         assert!(error(validate(&opaque)).contains("at 1 s, opacity must be between 0 and 1"));
+        let turning = &shapes(json!([{
+            "kind": "scene", "x": 0, "y": 0, "width": 300, "height": 200,
+            "camera": {"yaw": 0, "pitch": 20}, "keys": [{"at": 2, "camera": {"yaw": 90}}],
+            "objects": [{"kind": "sphere", "center": [0, 0, 0], "radius": 1}]
+        }]))[0];
+        match turning.at(1.0, &Style::default()) {
+            Shape::Scene { camera, .. } => assert_eq!([camera.yaw, camera.pitch], [45.0, 20.0]),
+            other => panic!("expected a scene, got {other:?}"),
+        }
+        let turned_line = line(json!([{"at": 1, "camera": {"yaw": 90}}]));
+        assert!(error(validate(&turned_line)).contains("a line key cannot set camera"));
     }
 
     #[test]

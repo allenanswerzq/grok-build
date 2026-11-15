@@ -263,7 +263,7 @@ impl Gpu {
         });
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
-                .context("No Vulkan GPU is available for drawing")?;
+                .context("Cannot draw anything: no Vulkan GPU driver could be loaded")?;
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("screen_draw"),
             required_limits: wgpu::Limits::default().using_resolution(adapter.limits()),

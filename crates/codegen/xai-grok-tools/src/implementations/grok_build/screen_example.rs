@@ -703,7 +703,7 @@ fn case_16_spinning_scene() -> Value {
                 "label": "yaw 0 to 360", "camera": { "yaw": 0, "pitch": 20 },
                 "objects": robot_arm(),
                 "keys": [
-                    { "at": 6, "yaw": 360 },
+                    { "at": 6, "camera": { "yaw": 360 } },
                 ],
             },
         ],
@@ -1273,7 +1273,7 @@ const DIGESTIVE_SYSTEM: &str = r##"{
             "kind": "scene", "x": 290, "y": 70, "width": 700, "height": 715,
             "background": "#1f3048", "fill": 1, "border": false,
             "camera": { "yaw": -18, "pitch": 4 },
-            "keys": [{ "at": 12, "yaw": 18, "ease": "in_out" }],
+            "keys": [{ "at": 12, "camera": { "yaw": 18 }, "ease": "in_out" }],
             "objects": [
                 {
                     "kind": "blob", "color": "#8fbfff", "material": "glass",

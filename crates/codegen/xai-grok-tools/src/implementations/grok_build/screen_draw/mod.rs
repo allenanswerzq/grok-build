@@ -110,10 +110,13 @@ Fields (? marks optional):
 - A mesh face is [a, b, c], three indices into vertices.
 - A series is {name?, color?, values? | points? | grid?}; a link is {from, to, value}; an axis
   is {label?, min?, max?}.
-- A key is {at, ease?, ...fields it sets}; ease is linear, in_out, or step.
+- A key is {at, ease?, ...fields it sets}, each written as in its shape or object, such as
+  camera {yaw}; ease is linear, in_out, or step.
 - color is a theme color (accent, red, yellow, green, or blue) or any #rrggbb hex color.
 - Shapes and their objects reject fields they do not list.
 - An invalid drawing fails with the shape and rule it breaks; fix it and call again.
+- Every shape, 2D or 3D, draws on the GPU. If the GPU cannot be loaded, no drawing works, so
+  tell the user instead of trying other shapes.
 
 Shapes:
 - A line runs from (x, y) to (to_x, to_y).
@@ -151,7 +154,7 @@ Shapes:
 Animation:
 - To animate a shape, give it keys. Each key has a time `at` in seconds and the values it sets.
 - Shape keys can set x, y, width, height, to_x, to_y, color, fill, opacity, line_width, size,
-  text, and a scene's camera yaw and pitch.
+  text, a scene's or chart's camera {yaw?, pitch?}, and a chart's series.
 - Scene object keys can set center, size, radius, radii, points, balls, from, to, color, and
   rotation; label keys can set color.
 - rotation turns an object in degrees about the x, y, then z axis around its center.
