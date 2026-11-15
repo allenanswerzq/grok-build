@@ -85,8 +85,8 @@ just cache  # inspect this checkout's latest cache activity
 
 The local binary is `target/debug/xai-grok-pager`. `screen_read` and
 `screen_draw` are enabled in the default toolset. Both run
-[`xai-screen`](crates/codegen/xai-screen/src/main.rs), which does all
-desktop work; build it with `just build xai-screen`. `just` lists all available commands.
+[`xai-screen`](crates/codegen/xai-screen/src/lib.rs), which does all
+desktop work, as a helper built into the same binary. `just` lists all available commands.
 
 The binary artifact is named `xai-grok-pager`; official installs ship it as
 `grok`. On first launch it opens your browser to authenticate — see the

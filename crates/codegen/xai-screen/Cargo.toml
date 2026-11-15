@@ -20,6 +20,7 @@ pollster = "0.4"
 smithay-client-toolkit = { version = "0.21", features = ["system"] }
 tungstenite = "0.28"
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "vulkan", "wgsl"] }
+xai-arg0 = { workspace = true }
 
 [lints]
 workspace = true

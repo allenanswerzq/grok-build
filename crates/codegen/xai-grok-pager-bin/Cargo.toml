@@ -20,6 +20,8 @@ path = "src/main.rs"
 xai-grok-pager = { path = "../xai-grok-pager", default-features = false }
 # Optional scrollback-native render mode, wired in via the fn-pointer seam.
 xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features = false }
+# Runs the mermaid, voice, and screen helpers from this binary.
+xai-arg0 = { workspace = true }
 
 # Agent runtime + leader/stdio/headless entry points.
 xai-grok-cloud-config = { workspace = true }
@@ -73,6 +75,7 @@ zstd = { workspace = true, optional = true }
 sha2 = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+xai-screen = { path = "../xai-screen" }
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }

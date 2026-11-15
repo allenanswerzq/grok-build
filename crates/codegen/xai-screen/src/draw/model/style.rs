@@ -57,7 +57,7 @@ pub fn hex(value: &str) -> Option<Rgb> {
     Some([r, g, b])
 }
 
-/// How drawings look. `xai-screen` reads it from the desktop on every draw, so theme changes
+/// How drawings look. The screen helper reads it from the desktop on every draw, so theme changes
 /// apply at once.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Style {

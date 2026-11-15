@@ -3,7 +3,7 @@
 //! Three backends share one interface (`spawn_pcm_capture`, `capture_pcm_for_duration`, `input_device_info`, `CaptureHandle`):
 //!
 //! - **Linux**: a subprocess recorder; the static-musl release binary cannot link `cpal`'s `alsa-sys`. See [`capture_linux`].
-//! - **macOS**: the self-exec `__mic-capture` helper subprocess; in-process CoreAudio memory is never returned. See [`capture_subprocess`].
+//! - **macOS**: the self-exec `--mic-capture` helper subprocess; in-process CoreAudio memory is never returned. See [`capture_subprocess`].
 //! - **Windows**: `cpal` (WASAPI) in-process; its memory cost is modest.
 //!
 //! The fixed-duration probe capture stays in-process on macOS/Windows.
@@ -14,10 +14,10 @@
 //! - macOS: `capture_subprocess::CaptureHandle`, an enum over the helper subprocess and the in-process fallback;
 //! - Windows: `capture::CaptureHandle` (in-process cpal stream).
 
-// cpal-based capture: the Windows backend, the macOS fallback, and the macOS `__mic-capture` child implementation
+// cpal-based capture: the Windows backend, the macOS fallback, and the macOS `--mic-capture` child implementation
 #[cfg(not(target_os = "linux"))]
 mod capture;
-// Wire protocol shared by the `__mic-capture` child (writer, in `capture`) and the macOS parent (parser, in `capture_subprocess`)
+// Wire protocol shared by the `--mic-capture` child (writer, in `capture`) and the macOS parent (parser, in `capture_subprocess`)
 #[cfg(not(target_os = "linux"))]
 mod protocol;
 #[cfg(not(target_os = "linux"))]

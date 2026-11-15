@@ -1,7 +1,7 @@
 //! `screen_draw`: draw boxes, lines and arrows, text, small 3D scenes, and charts on the
 //! screen.
 //!
-//! `xai-screen draw` does the whole job: it checks the drawing, finds the focused
+//! The `--screen draw` helper does the whole job: it checks the drawing, finds the focused
 //! monitor, reads the desktop's look, and shows the drawing above all windows. This tool passes
 //! each input on as the model wrote it. The process lives only while a drawing is visible:
 //! clearing, cancellation, a broken process, or the end of the session kills it, which removes
@@ -24,11 +24,11 @@ use crate::types::tool::{ToolKind, ToolNamespace};
 use crate::types::tool_metadata::{ToolMetadata, shared_resources};
 use crate::util::ProcessScope;
 
-/// Covers starting `xai-screen`, loading fonts, and the compositor showing the first frame.
+/// Covers starting the screen helper, loading fonts, and the compositor showing the first frame.
 const SHOW_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_REPLY: u64 = 64 * 1024;
 
-/// The complete drawing for the active monitor. `xai-screen` checks it.
+/// The complete drawing for the active monitor. The screen helper checks it.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ScreenDrawInput {
@@ -243,7 +243,7 @@ impl Tool for ScreenDrawTool {
     }
 }
 
-/// A session's `xai-screen draw`, kept running while its drawing shows.
+/// A session's `--screen draw`, kept running while its drawing shows.
 #[derive(Clone)]
 struct Screen {
     scope: ProcessScope,
@@ -276,7 +276,7 @@ impl Screen {
                 "Screen: the drawing did not appear in time",
             )
         })??;
-        // A drawing `xai-screen` refuses leaves the previous one on screen.
+        // A drawing the screen helper refuses leaves the previous one on screen.
         *slot = Some(overlay);
         let Drawn {
             monitor,
@@ -292,7 +292,7 @@ impl Screen {
     }
 }
 
-/// Where `xai-screen` showed a drawing.
+/// Where the screen helper showed a drawing.
 #[derive(Debug, Deserialize)]
 struct Drawn {
     monitor: String,

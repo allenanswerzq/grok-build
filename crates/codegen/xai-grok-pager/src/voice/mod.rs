@@ -31,4 +31,4 @@ pub(crate) use handle::{
     VoiceInterimCommit, commit_interim_into_prompt, merge_voice_fragment, prompt_blank_for_voice,
     space_voice_fragment,
 };
-pub use xai_grok_voice::maybe_run_capture_subprocess;
+pub use xai_grok_voice::ARG0_ENTRY;

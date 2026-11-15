@@ -3,7 +3,7 @@
 //! Voice is dictation only: the mic streams to STT and the transcript lands in the prompt box.
 //!
 //! On macOS and Linux the mic is opened in a short-lived subprocess, so the long-lived TUI never pays the audio stack's permanent memory cost.
-//! See [`audio`] and [`maybe_run_capture_subprocess`].
+//! See [`audio`] and [`ARG0_ENTRY`].
 
 #![deny(clippy::indexing_slicing)]
 
@@ -49,28 +49,26 @@ pub use transcriber::{
 /// The [`ClipTranscriber`] seam is exported regardless; without capture nothing ever calls it.
 pub const AUDIO_SUPPORTED: bool = cfg!(feature = "audio");
 
-/// Hidden subcommand consumers re-exec themselves with to capture microphone audio in a short-lived helper process on macOS.
+/// Arg0 entry name consumers re-exec themselves with to capture microphone audio in a short-lived helper process on macOS.
 /// See [`audio::capture_subprocess`](audio) for why capture is out of process.
-/// Intercepted via [`maybe_run_capture_subprocess`] at the very top of `main`, before any TUI/agent/tokio init, so the child stays minimal.
-pub const MIC_CAPTURE_SUBCOMMAND: &str = "__mic-capture";
+/// Runs [`ARG0_ENTRY`], which the binary registers at the very top of `main`, before any TUI/agent/tokio init, so the child stays minimal.
+pub const MIC_CAPTURE_SUBCOMMAND: &str = "--mic-capture";
 
-/// If this process was re-exec'd as the hidden mic-capture helper, run it and return `Some(exit_code)`; otherwise `None` (a normal invocation).
-/// Call at the very top of `main` in every binary that links this crate with `audio` (the pager composition root and `voice-probe`).
-/// This mirrors the pager's mermaid render child intercept.
-pub fn maybe_run_capture_subprocess() -> Option<i32> {
-    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    if !is_capture_subcommand(&argv) {
-        return None;
-    }
+/// The hidden mic-capture helper. Register it at the top of `main` with `xai_arg0::dispatch` in every binary
+/// that links this crate with `audio` (the pager composition root and `voice-probe`).
+pub const ARG0_ENTRY: xai_arg0::Entry = xai_arg0::Entry {
+    name: MIC_CAPTURE_SUBCOMMAND,
+    run: run_capture_helper,
+};
+
+fn run_capture_helper(args: Vec<std::ffi::OsString>) -> i32 {
     #[cfg(all(feature = "audio", not(target_os = "linux")))]
     {
-        // Skip argv[0] (binary) and argv[1] (subcommand); the rest are flags.
-        let args: Vec<String> = argv
+        let args = args
             .into_iter()
-            .skip(2)
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        Some(audio::run_capture_child_cli(args))
+        audio::run_capture_child_cli(args)
     }
     #[cfg(not(all(feature = "audio", not(target_os = "linux"))))]
     {
@@ -78,43 +76,11 @@ pub fn maybe_run_capture_subprocess() -> Option<i32> {
         // Only a hand-typed invocation reaches here
         // `write!` instead of `println!` so a closed pipe never panics
         use std::io::Write;
+        let _ = args;
         let _ = writeln!(
             std::io::stdout(),
             "ERR mic-capture helper unavailable in this build"
         );
-        Some(2)
-    }
-}
-
-/// Whether `argv` (the full process argv, including argv[0]) invokes the hidden mic-capture helper, i.e. argv[1] is [`MIC_CAPTURE_SUBCOMMAND`].
-/// Pure so the dispatch decision is unit-testable without mutating the process's real args.
-fn is_capture_subcommand(argv: &[std::ffi::OsString]) -> bool {
-    argv.get(1).and_then(|a| a.to_str()) == Some(MIC_CAPTURE_SUBCOMMAND)
-}
-
-#[cfg(test)]
-mod intercept_tests {
-    use super::*;
-
-    fn argv(items: &[&str]) -> Vec<std::ffi::OsString> {
-        items.iter().map(std::ffi::OsString::from).collect()
-    }
-
-    #[test]
-    fn capture_subcommand_matches_only_argv1() {
-        assert!(is_capture_subcommand(&argv(&["grok", "__mic-capture"])));
-        assert!(is_capture_subcommand(&argv(&[
-            "grok",
-            "__mic-capture",
-            "--rate",
-            "16000"
-        ])));
-        assert!(!is_capture_subcommand(&argv(&["grok"])));
-        assert!(!is_capture_subcommand(&argv(&["grok", "chat"])));
-        assert!(!is_capture_subcommand(&argv(&[
-            "grok",
-            "chat",
-            "__mic-capture"
-        ])));
+        2
     }
 }

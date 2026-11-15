@@ -1,4 +1,4 @@
-//! `xai-screen draw`: show drawings above all windows.
+//! `--screen draw`: show drawings above all windows.
 //!
 //! Each stdin line is the `screen_draw` tool's input as the model wrote it:
 //! `{"shapes": [...], "repeat": "..."}`. A line is checked against the drawing rules and the
@@ -30,7 +30,7 @@ pub fn run() -> Result<()> {
     wayland::run(std::io::BufReader::new(std::io::stdin()))
 }
 
-/// `xai-screen clear`: draw with no shapes.
+/// `--screen clear`: draw with no shapes.
 pub fn clear() -> Result<()> {
     wayland::run(&b"{\"shapes\": []}\n"[..])
 }

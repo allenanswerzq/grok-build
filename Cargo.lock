@@ -4958,13 +4958,16 @@ dependencies = [
  "tikv-jemalloc-sys",
  "tikv-jemallocator",
  "tokio",
+ "xai-arg0",
  "xai-crash-handler",
  "xai-grok-extra-ca",
  "xai-grok-pager",
  "xai-grok-pager-minimal",
  "xai-grok-sandbox",
  "xai-grok-shell",
+ "xai-grok-tools",
  "xai-grok-workspace",
+ "xai-screen",
  "xai-tty-utils",
 ]
 
@@ -13819,6 +13822,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "xai-arg0"
+version = "0.1.0"
+
+[[package]]
 name = "xai-chat-state"
 version = "0.1.0"
 dependencies = [
@@ -14801,6 +14808,7 @@ dependencies = [
  "windows-sys 0.59.0",
  "wiremock",
  "xai-acp-lib",
+ "xai-arg0",
  "xai-chat-state",
  "xai-crash-handler",
  "xai-dirs",
@@ -14875,6 +14883,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "xai-acp-lib",
+ "xai-arg0",
  "xai-crash-handler",
  "xai-dirs",
  "xai-grok-cloud-config",
@@ -14890,6 +14899,7 @@ dependencies = [
  "xai-grok-update",
  "xai-grok-version",
  "xai-grok-workspace",
+ "xai-screen",
  "xai-tty-utils",
  "zstd",
 ]
@@ -15630,6 +15640,7 @@ dependencies = [
  "wildmatch",
  "windows 0.61.3",
  "wiremock",
+ "xai-arg0",
  "xai-computer-hub-core",
  "xai-computer-hub-sdk",
  "xai-dirs",
@@ -15733,6 +15744,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "xai-arg0",
  "xai-dirs",
  "xai-grok-extra-ca",
  "xai-tty-utils",
@@ -16013,6 +16025,7 @@ dependencies = [
  "smithay-client-toolkit",
  "tungstenite",
  "wgpu",
+ "xai-arg0",
 ]
 
 [[package]]

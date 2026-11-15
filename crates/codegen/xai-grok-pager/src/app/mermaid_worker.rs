@@ -18,8 +18,8 @@
 //! A synchronous in-process render also could not be killed on timeout.
 //! The render therefore runs **out of process**, in a short-lived child:
 //!
-//! 1. The pager re-execs itself as `xai-grok-pager __mermaid-render` (see [`maybe_run_render_subprocess`]).
-//!    The subcommand is intercepted at the very top of `main`, before any TUI/agent/runtime init.
+//! 1. The pager re-execs itself as `xai-grok-pager --mermaid-render` (see [`ARG0_ENTRY`]).
+//!    The binary registers the helper at the very top of `main`, before any TUI/agent/runtime init.
 //!    The child reads the source from stdin and the theme/width/height from argv.
 //!    It renders the source to SVG then PNG, writes the PNG atomically to the out-path, and exits 0; any error exits non-zero.
 //! 2. The worker spawns that child with a wall-clock budget ([`timeout_for`]) via [`xai_grok_mermaid::run_with_timeout`].
@@ -51,9 +51,9 @@ use crate::scrollback::blocks::mermaid_content::{
 };
 use crate::theme::ThemeKind;
 
-/// Hidden subcommand the pager re-execs itself with to render one diagram in an isolated child process.
-/// Intercepted by [`maybe_run_render_subprocess`] at the very top of `main`, before any TUI/agent/tokio init.
-pub const MERMAID_RENDER_SUBCOMMAND: &str = "__mermaid-render";
+/// Arg0 entry name the pager re-execs itself with to render one diagram in an isolated child process.
+/// Runs [`ARG0_ENTRY`], which the binary registers at the very top of `main`, before any TUI/agent/tokio init.
+pub const MERMAID_RENDER_SUBCOMMAND: &str = "--mermaid-render";
 
 /// Tracing target for diagram render observability (mirrors `PROMPT_IMAGES_TRACING_TARGET`).
 /// Filter with `RUST_LOG=mermaid=debug`.
@@ -173,7 +173,7 @@ pub struct MermaidResult {
 type RenderFn = dyn Fn(&MermaidJob, Duration) -> Result<(), &'static str> + Send + Sync;
 
 /// The render function the worker uses: out-of-process in production, in-process under the crate's own `cargo test`.
-/// The test binary is not the pager and so cannot re-exec the `__mermaid-render` subcommand.
+/// The test binary is not the pager and so cannot re-exec the `--mermaid-render` subcommand.
 /// The real subprocess path is covered end to end by the integration test against the built binary.
 fn default_render_fn() -> Arc<RenderFn> {
     #[cfg(test)]
@@ -359,26 +359,19 @@ fn map_run_result(
     }
 }
 
-/// If this process was re-exec'd as the hidden mermaid render child, render the requested diagram and return `Some(exit_code)`.
-/// Otherwise `None` (it is a normal pager invocation).
-/// The child thus stays minimal, and a panic (abort) or runaway render is contained to this short-lived process.
-pub fn maybe_run_render_subprocess() -> Option<i32> {
-    let argv: Vec<std::ffi::OsString> = std::env::args_os().collect();
-    if !is_render_subcommand(&argv) {
-        return None;
-    }
-    // Skip argv[0] (binary) and argv[1] (subcommand); the rest are flags.
-    Some(match render_child(argv.into_iter().skip(2)) {
+/// The hidden mermaid render child; register it at the top of `main` with `xai_arg0::dispatch`.
+/// The child stays minimal, and a panic (abort) or runaway render is contained to this short-lived process.
+pub const ARG0_ENTRY: xai_arg0::Entry = xai_arg0::Entry {
+    name: MERMAID_RENDER_SUBCOMMAND,
+    run: run_render_helper,
+};
+
+fn run_render_helper(args: Vec<std::ffi::OsString>) -> i32 {
+    match render_child(args.into_iter()) {
         Ok(()) => 0,
         // Any failure is the caller's signal to fall back to the code block; the parent's stderr is null, so there is nothing to print
         Err(_) => 1,
-    })
-}
-
-/// Whether `argv` (the full process argv, incl. argv[0]) invokes the hidden render child, i.e. argv[1] is [`MERMAID_RENDER_SUBCOMMAND`].
-/// Pure so the dispatch decision is unit-testable without mutating the process's real args.
-fn is_render_subcommand(argv: &[std::ffi::OsString]) -> bool {
-    argv.get(1).and_then(|a| a.to_str()) == Some(MERMAID_RENDER_SUBCOMMAND)
+    }
 }
 
 /// Slack added to the parent's forwarded wall-clock budget for the render child's self-watchdog.
@@ -404,7 +397,7 @@ fn child_watchdog_deadline(forwarded_budget: Duration) -> Duration {
 #[cfg(target_os = "linux")]
 const CHILD_ADDRESS_SPACE_CAP_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-/// Called only from [`render_child`] (itself reached only via the real subcommand entry [`maybe_run_render_subprocess`]).
+/// Called only from [`render_child`] (itself reached only via the real helper entry [`ARG0_ENTRY`]).
 /// The worker/child unit tests drive the smaller pieces ([`parse_render_args`], [`render_and_write`]) directly, so they never start the watchdog.
 /// (so an abruptly-dead parent cannot leave a CPU-spinning orphan);
 fn install_child_backstops(forwarded_budget: Duration) {
@@ -467,7 +460,7 @@ fn install_parent_death_signal() {
     }
 }
 
-/// The parsed `__mermaid-render` child argv.
+/// The parsed `--mermaid-render` child argv.
 struct RenderArgs {
     out: PathBuf,
     theme_dark: bool,
@@ -620,7 +613,7 @@ fn render_source_to_png(
 }
 
 /// In-process render used only by this crate's own `cargo test` (see [`default_render_fn`]).
-/// The test harness binary cannot re-exec the `__mermaid-render` subcommand, so the worker tests render the diagram directly.
+/// The test harness binary cannot re-exec the `--mermaid-render` subcommand, so the worker tests render the diagram directly.
 /// The real out-of-process path is covered by the integration test against the built pager binary.
 #[cfg(test)]
 fn render_in_process_for_tests(job: &MermaidJob, _timeout: Duration) -> Result<(), &'static str> {
@@ -1513,7 +1506,7 @@ mod tests {
             .into_iter()
     }
 
-    /// The child arg-parser accepts a full valid invocation and rejects every malformed argv shape the `__mermaid-render` child can receive.
+    /// The child arg-parser accepts a full valid invocation and rejects every malformed argv shape the `--mermaid-render` child can receive.
     /// It does so without spawning a process or touching stdin.
     #[test]
     fn parse_render_args_accepts_valid_and_rejects_malformed() {
@@ -1583,7 +1576,7 @@ mod tests {
     }
 
     /// The child's render-and-write core turns a real source into a decodable PNG on disk.
-    /// This is the happy path the `__mermaid-render` child takes after reading stdin (the stdin half is covered by the subprocess integration test).
+    /// This is the happy path the `--mermaid-render` child takes after reading stdin (the stdin half is covered by the subprocess integration test).
     #[test]
     fn render_and_write_produces_decodable_png() {
         let dir = tempfile::tempdir().unwrap();
@@ -1618,32 +1611,6 @@ mod tests {
             "empty source must error"
         );
         assert!(!out.exists(), "no PNG for an unrenderable source");
-    }
-
-    /// The subcommand gate recognizes `__mermaid-render` only as argv[1], the dispatch that routes a re-exec into the render child.
-    #[test]
-    fn is_render_subcommand_matches_only_argv1() {
-        let argv = |v: &[&str]| v.iter().map(std::ffi::OsString::from).collect::<Vec<_>>();
-        assert!(is_render_subcommand(&argv(&[
-            "grok",
-            MERMAID_RENDER_SUBCOMMAND
-        ])));
-        assert!(is_render_subcommand(&argv(&[
-            "grok",
-            MERMAID_RENDER_SUBCOMMAND,
-            "--out",
-            "/tmp/x.png",
-        ])));
-        // Normal invocations are not the render child.
-        assert!(!is_render_subcommand(&argv(&["grok"])));
-        assert!(!is_render_subcommand(&argv(&["grok", "chat"])));
-        assert!(!is_render_subcommand(&argv(&[])));
-        // The subcommand only counts as argv[1], not deeper in the args.
-        assert!(!is_render_subcommand(&argv(&[
-            "grok",
-            "chat",
-            MERMAID_RENDER_SUBCOMMAND,
-        ])));
     }
 
     /// `map_run_result` maps every subprocess outcome to the right source-free category.

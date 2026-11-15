@@ -19,18 +19,17 @@ build package=cli *flags:
 
 # Build the smallest grok-lean binary (nightly; rebuilds std, takes 15-20 minutes).
 build-lean *flags:
-    rustup run nightly-2026-10-04 cargo build -p grok-lean -p xai-screen --locked -j {{ jobs }} --profile lean --config crates/codegen/grok-lean/lean.toml "$@"
-    @ls -lh target/x86_64-unknown-linux-gnu/lean/{grok-lean,xai-screen}
+    rustup run nightly-2026-10-04 cargo build -p grok-lean --locked -j {{ jobs }} \
+        --profile lean --config crates/codegen/grok-lean/lean.toml "$@"
+    @ls -lh target/x86_64-unknown-linux-gnu/lean/grok-lean
 
-# Build grok-lean, xai-screen, and the screen example unoptimized, for quick testing.
-# The example builds separately so its tool features stay out of grok-lean.
+# Build grok-lean unoptimized, for quick testing; try the screen with --screen-example draw.
 build-lean-debug *flags:
-    cargo build -p grok-lean -p xai-screen --locked -j {{ jobs }} "$@"
-    cargo build -p xai-grok-tools --example screen --locked -j {{ jobs }} "$@"
-    @ls -lh target/debug/{grok-lean,xai-screen,examples/screen}
+    cargo build -p grok-lean --locked -j {{ jobs }} "$@"
+    @ls -lh target/debug/grok-lean
 
-# Build the CLI and xai-screen, then launch the TUI with any TUI arguments.
-run *args: build (build "xai-screen")
+# Build the CLI, then launch the TUI with any TUI arguments.
+run *args: build
     ./target/debug/xai-grok-pager "$@"
 
 # Type-check a package without building binaries.
@@ -42,7 +41,7 @@ test package=cli *flags:
     cargo test -p "$1" --locked -j {{ jobs }} "${@:2}"
 
 # Run live tests (default: tests/*_live.rs) against the built CLI on an unlocked desktop.
-test-live package="xai-grok-tools" *flags: build (build "xai-screen")
+test-live package="xai-grok-tools" *flags: build
     flags=("${@:2}"); [ ${#flags[@]} -gt 0 ] || flags=(--test '*_live'); \
     GROK_BINARY="{{ justfile_directory() }}/target/debug/xai-grok-pager" \
     RUST_TEST_THREADS=1 RUST_TEST_NOCAPTURE=1 \

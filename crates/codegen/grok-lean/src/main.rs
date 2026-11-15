@@ -86,31 +86,48 @@ fn lean_config() -> serde_json::Value {
     })
 }
 
+/// Helpers this binary runs as itself; see `xai_arg0`.
+const ARG0_ENTRIES: &[xai_arg0::Entry] = &[
+    #[cfg(target_os = "linux")]
+    xai_screen::ARG0_ENTRY,
+    xai_grok_tools::implementations::grok_build::screen_example::ARG0_ENTRY,
+];
+
 fn main() {
+    xai_arg0::dispatch_or_else(ARG0_ENTRIES, app)
+}
+
+/// The TUI, for every invocation that names no arg0 entry. Returns the exit code.
+fn app() -> i32 {
     let args = PagerArgs::parse_cli();
     if args.version {
         println!("grok-lean {}", env!("CARGO_PKG_VERSION"));
-        return;
+        return 0;
     }
-    let args = lean_args(args).unwrap_or_else(|error| exit_with(&format!("grok-lean: {error:#}")));
+    let args = match lean_args(args) {
+        Ok(args) => args,
+        Err(error) => return fail(&format!("grok-lean: {error:#}")),
+    };
     xai_grok_pager_minimal::install();
     #[cfg(unix)]
     xai_grok_pager::memory_release::install_release_hook(purge_retained_pages);
     xai_crash_handler::install_terminal_restore_only();
     xai_tty_utils::runtime::set_blocking_pool(BLOCKING_POOL);
-    let runtime = build_runtime().unwrap_or_else(|error| {
-        exit_with(&format!("grok-lean: cannot start the runtime: {error}"))
-    });
+    let runtime = match build_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => return fail(&format!("grok-lean: cannot start the runtime: {error}")),
+    };
     let result = runtime.block_on(run(args));
     runtime.shutdown_timeout(SHUTDOWN_GRACE);
-    if let Err(error) = result {
-        xai_tty_utils::restore_native_stderr();
-        let report = match error.downcast_ref::<xai_grok_pager::app::StartupFailure>() {
-            Some(startup) => startup.user_report(),
-            None => format!("Error: {error:#}"),
-        };
-        exit_with(&report);
-    }
+    let Err(error) = result else {
+        return 0;
+    };
+    xai_tty_utils::restore_native_stderr();
+    let report = match error.downcast_ref::<xai_grok_pager::app::StartupFailure>() {
+        Some(startup) => startup.user_report(),
+        None => format!("Error: {error:#}"),
+    };
+    fail(&report)
 }
 
 /// Keeps the interactive flags and fixes the ones lean mode decides. Runs before any thread
@@ -209,7 +226,7 @@ fn purge_retained_pages() {
     }
 }
 
-fn exit_with(message: &str) -> ! {
+fn fail(message: &str) -> i32 {
     xai_grok_pager::best_effort_stderr::eprint_line(message);
-    std::process::exit(1);
+    1
 }

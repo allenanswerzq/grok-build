@@ -1,4 +1,4 @@
-//! PCM-over-pipe code shared by the subprocess capture backends (Linux system recorder, macOS `__mic-capture` helper).
+//! PCM-over-pipe code shared by the subprocess capture backends (Linux system recorder, macOS `--mic-capture` helper).
 //! This module holds the capture child's stop handle, a reader loop that forwards the child's stdout to the async STT sender, and a stderr drain.
 
 use std::io::Read;

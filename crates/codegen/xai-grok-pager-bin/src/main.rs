@@ -2036,12 +2036,12 @@ fn dispatch_doctor_if_requested(args: &PagerArgs) -> bool {
 fn main() {
     xai_grok_version::set_full_version(env!("VERSION_WITH_COMMIT"));
     xai_grok_telemetry::startup::mark_process_start();
-    if let Some(code) = xai_grok_pager::app::mermaid_worker::maybe_run_render_subprocess() {
-        std::process::exit(code);
-    }
-    if let Some(code) = xai_grok_pager::voice::maybe_run_capture_subprocess() {
-        std::process::exit(code);
-    }
+    xai_arg0::dispatch(&[
+        xai_grok_pager::app::mermaid_worker::ARG0_ENTRY,
+        xai_grok_pager::voice::ARG0_ENTRY,
+        #[cfg(target_os = "linux")]
+        xai_screen::ARG0_ENTRY,
+    ]);
     set_release_channel(ReleaseChannel::from_label(
         xai_grok_update::channel_name().unwrap_or_default(),
     ));

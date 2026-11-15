@@ -96,14 +96,13 @@ async fn exercise() -> Result<()> {
         "Read the screen, mark a spot, clear the drawing, and report completion.",
     ]);
     // TestSandbox clears the real environment. Give only this test's child access
-    // to the existing desktop sockets and the freshly built `xai-screen`.
+    // to the existing desktop sockets.
     let mut environment = Vec::new();
     for name in [
         "XDG_RUNTIME_DIR",
         "WAYLAND_DISPLAY",
         "DBUS_SESSION_BUS_ADDRESS",
         "HYPRLAND_INSTANCE_SIGNATURE",
-        "GROK_SCREEN",
     ] {
         if let Ok(value) = std::env::var(name) {
             environment.push((name, value));

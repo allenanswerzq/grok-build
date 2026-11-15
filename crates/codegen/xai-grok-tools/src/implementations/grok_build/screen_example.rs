@@ -1,8 +1,10 @@
-//! Check the screen tools on this desktop.
+//! Check the screen tools on this desktop, as the `--screen-example` entry of a binary that
+//! registers [`ARG0_ENTRY`] (see `xai-arg0`), such as `grok-lean`.
 //!
-//! - `screen draw` shows every drawing case in turn; press Enter for the next one.
-//! - `screen draw N` shows only case N.
-//! - `screen read DIRECTORY` reads the visible windows and saves one image per window.
+//! - `--screen-example draw` shows every drawing case in turn; press Enter for the next one.
+//! - `--screen-example draw N` shows only case N.
+//! - `--screen-example read DIRECTORY` reads the visible windows and saves one image per
+//!   window.
 //!
 //! Each case is exactly what a model would send to `screen_draw`: a `shapes` list, or the
 //! whole input when it also sets `repeat`. It is printed in the terminal while it is on
@@ -11,22 +13,34 @@
 //! logical units.
 //!
 //! ```sh
-//! just build xai-screen
-//! just build xai-grok-tools --example screen
-//! ./target/debug/examples/screen draw
+//! just build-lean-debug
+//! ./target/debug/grok-lean --screen-example draw
 //! ```
 
+#![expect(
+    clippy::indexing_slicing,
+    reason = "the cases index small fixed arrays of coordinates"
+)]
+
+use std::ffi::OsString;
 use std::ops::RangeInclusive;
 use std::path::Path;
 
 use anyhow::{Context, Result, bail, ensure};
 use base64::Engine as _;
 use serde_json::{Value, json};
-use xai_grok_tools::implementations::grok_build::screen_draw::{ScreenDrawInput, ScreenDrawTool};
-use xai_grok_tools::implementations::grok_build::screen_read::{ScreenReadInput, ScreenReadTool};
-use xai_grok_tools::types::resources::Resources;
-use xai_grok_tools::types::tool_metadata::test_ctx;
 use xai_tool_runtime::{Tool, ToolCallContext};
+
+use super::screen_draw::{ScreenDrawInput, ScreenDrawTool};
+use super::screen_read::{ScreenReadInput, ScreenReadTool};
+use crate::types::resources::Resources;
+use crate::types::tool_metadata::test_ctx;
+
+/// The screen example; register it in a binary's arg0 entries.
+pub const ARG0_ENTRY: xai_arg0::Entry = xai_arg0::Entry {
+    name: "--screen-example",
+    run: run_example,
+};
 
 /// A caption and the drawing it shows.
 type Case = (&'static str, fn() -> Value);
@@ -1363,12 +1377,24 @@ fn round(value: f64) -> f64 {
     (value * 1000.0).round() / 1000.0
 }
 
-fn main() -> Result<()> {
-    tokio::runtime::Runtime::new()?.block_on(cases())
+fn run_example(args: Vec<OsString>) -> i32 {
+    let args: Vec<String> = args
+        .into_iter()
+        .map(|arg| arg.to_string_lossy().into_owned())
+        .collect();
+    let result = tokio::runtime::Runtime::new()
+        .map_err(anyhow::Error::from)
+        .and_then(|runtime| runtime.block_on(cases(&args)));
+    match result {
+        Ok(()) => 0,
+        Err(error) => {
+            eprintln!("Error: {error:#}");
+            1
+        }
+    }
 }
 
-async fn cases() -> Result<()> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
+async fn cases(args: &[String]) -> Result<()> {
     let ctx = test_ctx(Resources::new().into_shared());
     match args.iter().map(String::as_str).collect::<Vec<_>>()[..] {
         ["draw"] => draw(&ctx, 1..=CASES.len()).await,
@@ -1382,7 +1408,7 @@ async fn cases() -> Result<()> {
             draw(&ctx, number..=number).await
         }
         ["read", directory] => read(&ctx, Path::new(directory)).await,
-        _ => bail!("Usage: screen draw [N] | screen read DIRECTORY"),
+        _ => bail!("Usage: --screen-example draw [N] | --screen-example read DIRECTORY"),
     }
 }
 
@@ -1404,14 +1430,14 @@ async fn draw(ctx: &ToolCallContext, numbers: RangeInclusive<usize>) -> Result<(
         if let Some(shapes) = input["shapes"].as_array_mut() {
             shapes.insert(0, caption);
         }
-        run(ctx, serde_json::from_value(input)?).await?;
+        show(ctx, serde_json::from_value(input)?).await?;
         println!("Press Enter to continue.");
         std::io::stdin().read_line(&mut String::new())?;
     }
-    run(ctx, ScreenDrawInput::default()).await
+    show(ctx, ScreenDrawInput::default()).await
 }
 
-async fn run(ctx: &ToolCallContext, input: ScreenDrawInput) -> Result<()> {
+async fn show(ctx: &ToolCallContext, input: ScreenDrawInput) -> Result<()> {
     println!("{}", ScreenDrawTool.run(ctx.clone(), input).await?);
     Ok(())
 }

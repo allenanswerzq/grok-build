@@ -1,6 +1,6 @@
 //! End-to-end coverage of the out-of-process Mermaid render path.
 //!
-//! Spawns the **real** built pager binary as the hidden `__mermaid-render` child via [`render_via_subprocess`].
+//! Spawns the **real** built pager binary as the hidden `--mermaid-render` child via [`render_via_subprocess`].
 //! That is the exact function the render worker uses in production. It asserts:
 //!   * a valid diagram (the cyclic login-flow) renders to a decodable PNG;
 //!   * an oversized or invalid diagram is *contained*: the child exits non-zero, the parent returns `Err`, and no PNG is written;
@@ -64,7 +64,7 @@ fn child_renders_login_flow_to_png() {
 
     assert!(
         result.is_ok(),
-        "the login-flow must render via the __mermaid-render child: {result:?}"
+        "the login-flow must render via the --mermaid-render child: {result:?}"
     );
     assert!(out.exists(), "the child wrote the PNG to the out-path");
     let bytes = std::fs::read(&out).expect("read PNG");

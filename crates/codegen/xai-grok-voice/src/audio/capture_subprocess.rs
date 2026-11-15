@@ -2,7 +2,7 @@
 //!
 //! Opening CoreAudio in-process permanently dirties the pager's memory footprint.
 //! The HAL costs several MB plus device capture buffers (tens of MB with some input routes), none of it returned to the OS after the stream drops.
-//! Capture therefore runs out of process, like the Linux recorder backend: the pager spawns `current_exe __mic-capture --rate N`.
+//! Capture therefore runs out of process, like the Linux recorder backend: the pager spawns `current_exe --mic-capture --rate N`.
 //! The child streams raw PCM16 mono LE to stdout behind a one-line `READY`/`ERR` header (see [`super::capture::run_capture_child_cli`]).
 //! All audio-stack memory is freed when the child exits with the utterance.
 //! The helper is the same executable, so the terminal's mic permission grant applies unchanged.

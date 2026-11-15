@@ -39,6 +39,7 @@ xai-grok-markdown = { workspace = true }
 # dagre-based vendored engine renders detected ```mermaid fences out of process,
 # gated only at runtime by the `appearance.render_mermaid` setting.
 xai-grok-mermaid = { workspace = true }
+xai-arg0 = { workspace = true }
 syntect = { workspace = true }
 
 # Data

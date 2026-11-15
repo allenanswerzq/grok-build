@@ -1,7 +1,7 @@
 //! `screen_read`: show the model what is on the screen.
 //!
 //! The tool returns every window visible on the active monitor except terminals.
-//! `xai-screen read` captures them; this tool fits each screenshot into the model's image
+//! The `--screen read` helper captures them; this tool fits each screenshot into the model's image
 //! budget. Positions are logical units from the monitor's top-left corner. Chrome windows also
 //! carry the visible page's accessibility text.
 
@@ -236,7 +236,7 @@ impl Tool for ScreenReadTool {
     }
 }
 
-/// Reads the screen with `xai-screen read`.
+/// Reads the screen with `--screen read`.
 struct DesktopScreen {
     scope: ProcessScope,
 }
@@ -269,7 +269,7 @@ impl ScreenReader for DesktopScreen {
     }
 }
 
-/// What `xai-screen read` prints.
+/// What `--screen read` prints.
 #[derive(Deserialize)]
 struct Capture {
     monitor: String,

@@ -6,21 +6,25 @@ license.workspace = true
 publish = false
 
 # A second composition root over the same pager, agent, and tools as `xai-grok-pager-bin`,
-# started with lean defaults. The screen tools find `xai-screen` beside this binary,
-# so build that package into the same profile.
+# started with lean defaults. Its helpers, such as the screen helper, run from this same binary.
 
 [dependencies]
 anyhow = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+xai-arg0 = { workspace = true }
 xai-crash-handler = { path = "../xai-crash-handler" }
 xai-grok-extra-ca = { workspace = true }
 xai-grok-pager = { path = "../xai-grok-pager", default-features = false, features = ["sandbox-enforce"] }
 xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features = false }
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
+xai-grok-tools = { workspace = true }
 xai-grok-workspace = { workspace = true }
 xai-tty-utils = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+xai-screen = { path = "../xai-screen" }
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-sys = { workspace = true }

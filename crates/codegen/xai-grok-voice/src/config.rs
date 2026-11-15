@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::error::VoiceError;
 
-/// Default STT capture rate (Hz). Shared with the `__mic-capture` helper's argv default so parent and child agree when `--rate` is omitted.
+/// Default STT capture rate (Hz). Shared with the `--mic-capture` helper's argv default so parent and child agree when `--rate` is omitted.
 pub const DEFAULT_SAMPLE_RATE: u32 = 16_000;
 
 /// Prefer https `api_base` (same shape as chat). [`Self::stt_ws_url`] derives `wss://`. When `[voice].api_base` is unset,

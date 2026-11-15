@@ -1,4 +1,4 @@
-//! Wire protocol between the `__mic-capture` helper child and its parent.
+//! Wire protocol between the `--mic-capture` helper child and its parent.
 //!
 //! One status header line on stdout, then (in capture mode) raw PCM:
 //! - `READY <device>`: capture stream open, PCM follows;

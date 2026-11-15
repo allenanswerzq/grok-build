@@ -14,11 +14,9 @@ use xai_grok_voice::{
 };
 
 fn main() -> anyhow::Result<()> {
-    // Hidden mic-capture helper intercept (macOS): the capture backend re-execs the current binary, here voice-probe itself
+    // Hidden mic-capture helper (macOS): the capture backend re-execs the current binary, here voice-probe itself
     // It runs before any runtime/TLS init so the capture child stays minimal
-    if let Some(code) = xai_grok_voice::maybe_run_capture_subprocess() {
-        std::process::exit(code);
-    }
+    xai_arg0::dispatch(&[xai_grok_voice::ARG0_ENTRY]);
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?

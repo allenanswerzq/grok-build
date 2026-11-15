@@ -4,11 +4,11 @@
 //! Otherwise it uses the device default (typically 48 kHz stereo F32 on macOS) and downmixes and resamples to 16 kHz mono for the STT API.
 //! cpal streams are not `Send` on all platforms; capture runs on a dedicated std thread and forwards PCM chunks through a sync channel.
 //!
-//! # Two roles: in-process backend and `__mic-capture` child
+//! # Two roles: in-process backend and `--mic-capture` child
 //!
 //! On Windows this module is the capture backend itself (WASAPI's in-process memory cost is modest).
 //! On macOS, opening CoreAudio in-process permanently dirties several MB that the OS never returns after the stream drops.
-//! [`super::capture_subprocess`] therefore re-execs the binary as a short-lived `__mic-capture` helper.
+//! [`super::capture_subprocess`] therefore re-execs the binary as a short-lived `--mic-capture` helper.
 //! This module provides that child ([`run_capture_child_cli`]) and the in-process fallback.
 //! The fallback covers self-exec being unavailable (e.g. the on-disk binary was replaced by an update).
 
@@ -458,7 +458,7 @@ fn resample_mono_i16(samples: &[i16], input_rate: u32, output_rate: u32) -> Vec<
 }
 
 // ---------------------------------------------------------------------------
-// `__mic-capture` child mode (see the module docs and `capture_subprocess`).
+// `--mic-capture` child mode (see the module docs and `capture_subprocess`).
 // ---------------------------------------------------------------------------
 
 /// Run the `mic-capture` helper child; `args` is argv after the subcommand. Wire protocol (stdout): one status header

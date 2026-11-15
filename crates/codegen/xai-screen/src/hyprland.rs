@@ -248,7 +248,7 @@ fn parse_palette(colors: &str) -> Palette {
 fn run(program: &str, args: &[&str], limit: u64, timeout: Duration) -> Result<Vec<u8>> {
     #[expect(
         clippy::disallowed_methods,
-        reason = "children join xai-screen's process group, which the tool enrolls in its session"
+        reason = "children join the screen helper's process group, which the tool enrolls in its session"
     )]
     let mut child = Command::new(program)
         .args(args)

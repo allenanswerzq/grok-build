@@ -1,4 +1,4 @@
-//! `xai-screen read`: print the visible windows of the focused monitor as one JSON line.
+//! `--screen read`: print the visible windows of the focused monitor as one JSON line.
 //!
 //! Every window shown on the monitor is captured by itself with `grim -T`, so the wallpaper
 //! and overlapping windows never appear in its screenshot. Terminals are left out.

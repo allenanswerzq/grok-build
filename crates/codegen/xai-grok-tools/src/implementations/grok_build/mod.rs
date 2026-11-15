@@ -26,6 +26,7 @@ pub mod read_file;
 pub mod scheduler;
 mod screen;
 pub mod screen_draw;
+pub mod screen_example;
 pub mod screen_read;
 pub mod search_replace;
 pub mod send_feedback;

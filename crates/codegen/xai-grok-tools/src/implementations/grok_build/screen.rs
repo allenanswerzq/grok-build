@@ -1,11 +1,9 @@
-//! The `xai-screen` program, which does all desktop work for `screen_read` and
-//! `screen_draw`. The tools only talk to the model and run it: `xai-screen read` answers
-//! once, and `xai-screen draw` keeps its drawing on screen while it runs. Requests and
-//! replies are single JSON lines. Dropping a [`ScreenProcess`] kills its process group.
-//!
-//! Build it with `just build xai-screen`.
+//! The `--screen` helper, which does all desktop work for `screen_read` and `screen_draw`.
+//! It is built into the running binary (see `xai-arg0`), and the tools only talk to the model
+//! and run it: `--screen read` answers once, and `--screen draw` keeps its drawing on screen
+//! while it runs. Requests and replies are single JSON lines. Dropping a [`ScreenProcess`] kills
+//! its process group.
 
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 
@@ -17,9 +15,10 @@ use xai_tool_runtime::{ToolError, ToolErrorKind};
 
 use crate::util::{ProcessGroup, ProcessScope, global_process_scope};
 
-const PROGRAM: &str = "xai-screen";
+/// The helper's name, as registered by `xai_screen::ARG0_ENTRY`.
+const ARG0_NAME: &str = "--screen";
 
-/// A running `xai-screen`.
+/// A running screen helper.
 pub(crate) struct ScreenProcess {
     child: Child,
     group: Arc<ProcessGroup>,
@@ -28,22 +27,21 @@ pub(crate) struct ScreenProcess {
 }
 
 impl ScreenProcess {
-    /// Start `xai-screen <mode>` in the session's process scope.
+    /// Start `--screen <mode>` in the session's process scope.
     pub(crate) fn spawn(mode: &str, scope: &ProcessScope) -> Result<Self, ToolError> {
-        Self::start(&executable()?, mode, scope)
+        let mut command = xai_arg0::command(ARG0_NAME).map_err(cannot_start)?;
+        command.arg(mode);
+        Self::start(command, scope)
     }
 
-    fn start(executable: &Path, mode: &str, scope: &ProcessScope) -> Result<Self, ToolError> {
-        let mut command = Command::new(executable);
+    fn start(command: std::process::Command, scope: &ProcessScope) -> Result<Self, ToolError> {
+        let mut command = Command::from(command);
         command
-            .arg(mode)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
             .kill_on_drop(true);
-        let (mut child, group) = scope
-            .spawn(command)
-            .map_err(|error| failure(format!("Cannot start {}: {error}", executable.display())))?;
+        let (mut child, group) = scope.spawn(command).map_err(cannot_start)?;
         if !global_process_scope().register(&group) {
             return Err(failure("The session is closing"));
         }
@@ -72,7 +70,7 @@ impl ScreenProcess {
         self.input.flush().await.map_err(failure)
     }
 
-    /// Read one reply line of at most `limit` bytes: the answer, or the error `xai-screen`
+    /// Read one reply line of at most `limit` bytes: the answer, or the error the helper
     /// reports, such as a drawing that breaks a rule.
     pub(crate) async fn receive<T: DeserializeOwned>(
         &mut self,
@@ -86,9 +84,9 @@ impl ScreenProcess {
             .map_err(failure)?;
         if line.last() != Some(&b'\n') {
             return Err(failure(if line.is_empty() {
-                "xai-screen stopped without answering"
+                "The screen helper stopped without answering"
             } else {
-                "xai-screen's answer is too long"
+                "The screen helper's answer is too long"
             }));
         }
         match serde_json::from_slice(&line).map_err(failure)? {
@@ -115,28 +113,8 @@ enum Reply<T> {
     Done(T),
 }
 
-/// `GROK_SCREEN`, else `xai-screen` beside the running binary (or one directory up, for tests
-/// and examples), else on PATH.
-fn executable() -> Result<PathBuf, ToolError> {
-    if let Some(path) = std::env::var_os("GROK_SCREEN") {
-        return Ok(path.into());
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|binary| {
-            binary
-                .ancestors()
-                .skip(1)
-                .take(2)
-                .map(|directory| directory.join(PROGRAM))
-                .find(|path| path.is_file())
-        })
-        .or_else(|| which::which(PROGRAM).ok())
-        .ok_or_else(|| {
-            failure(
-                "Cannot find xai-screen; build it with `just build xai-screen` or set GROK_SCREEN",
-            )
-        })
+fn cannot_start(error: std::io::Error) -> ToolError {
+    failure(format!("Cannot start the screen helper: {error}"))
 }
 
 pub(crate) fn failure(error: impl std::fmt::Display) -> ToolError {
@@ -161,13 +139,15 @@ mod tests {
     #[tokio::test]
     async fn requests_and_replies_are_json_lines() {
         let directory = tempfile::tempdir().unwrap();
-        let program = directory.path().join("xai-screen");
+        let program = directory.path().join("screen");
         let script = "#!/bin/sh\n[ \"$1\" = draw ] || exit 1\nread line\n\
             echo '{\"monitor\": \"eDP-1\"}'\nread line\necho '{\"error\": \"Shape 1 (box): bad\"}'\n";
         std::fs::write(&program, script).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
         let scope = ProcessScope::new();
-        let mut screen = ScreenProcess::start(&program, "draw", &scope).unwrap();
+        let mut command = std::process::Command::new(&program);
+        command.arg("draw");
+        let mut screen = ScreenProcess::start(command, &scope).unwrap();
         screen.send(&json!({"shapes": []})).await.unwrap();
         let drawn = screen.receive::<Drawn>(1024).await.unwrap();
         assert_eq!(drawn.unwrap().monitor, "eDP-1");
