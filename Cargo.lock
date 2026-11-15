@@ -4966,7 +4966,6 @@ dependencies = [
  "xai-grok-sandbox",
  "xai-grok-shell",
  "xai-grok-tools",
- "xai-grok-workspace",
  "xai-screen",
  "xai-tty-utils",
 ]

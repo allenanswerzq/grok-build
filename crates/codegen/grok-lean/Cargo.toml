@@ -20,7 +20,6 @@ xai-grok-pager-minimal = { path = "../xai-grok-pager-minimal", default-features 
 xai-grok-sandbox = { path = "../xai-grok-sandbox", default-features = false }
 xai-grok-shell = { path = "../xai-grok-shell", default-features = false }
 xai-grok-tools = { workspace = true }
-xai-grok-workspace = { workspace = true }
 xai-tty-utils = { workspace = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

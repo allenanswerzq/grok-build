@@ -24,14 +24,14 @@ pub struct Entry {
 
 static ENTRIES: OnceLock<&'static [Entry]> = OnceLock::new();
 
-/// Call first in `main`, before any thread starts. When the first argument names one of
-/// `entries`, runs it and exits. Otherwise records `entries` for [`command`] and returns.
+/// Call first in `main`, before any thread starts. Records `entries` for [`command`], so an
+/// entry can start another. When the first argument names one of them, runs it and exits.
 pub fn dispatch(entries: &'static [Entry]) {
+    let _ = ENTRIES.set(entries);
     let mut args = std::env::args_os().skip(1);
     if let Some(entry) = args.next().and_then(|name| find(entries, &name)) {
         std::process::exit((entry.run)(args.collect()));
     }
-    let _ = ENTRIES.set(entries);
 }
 
 /// The whole of `main`: runs the entry the first argument names, or else `app`, and exits

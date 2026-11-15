@@ -193,7 +193,7 @@ fn build_runtime() -> std::io::Result<tokio::runtime::Runtime> {
 
 async fn run(mut args: PagerArgs) -> Result<()> {
     xai_grok_extra_ca::ensure_default_crypto_provider();
-    xai_grok_shell::http::set_client_name(xai_grok_workspace::permission::ClientType::GrokPager);
+    xai_grok_shell::http::set_client_name(xai_grok_shell::http::ClientType::GrokPager);
     args.pin_local_resume_target()?;
     let saved_profile = args.saved_resume_profile();
     let sandbox = match args.startup_sandbox_profile(saved_profile.as_deref()) {
