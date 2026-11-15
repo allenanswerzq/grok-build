@@ -83,6 +83,7 @@ jobs:
             cmake \
             libffi-dev \
             libwayland-dev \
+            libxkbcommon-dev \
             pkg-config \
             unzip \
             zlib1g-dev
