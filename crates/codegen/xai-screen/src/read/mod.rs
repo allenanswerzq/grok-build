@@ -1,7 +1,7 @@
 //! `xai-screen read`: print the visible windows of the focused monitor as one JSON line.
 //!
 //! Every window shown on the monitor is captured by itself with `grim -T`, so the wallpaper
-//! and overlapping windows never appear in its screenshot. Alacritty terminals are left out.
+//! and overlapping windows never appear in its screenshot. Terminals are left out.
 //! Positions are logical units from the monitor's top-left corner. Chrome windows also carry
 //! the visible page's accessibility text; see [`chrome`].
 
@@ -15,8 +15,25 @@ use serde::Serialize;
 
 use crate::hyprland::{self, Client, Monitor};
 
-/// Windows whose class starts with this prefix are terminals and are never captured.
-const TERMINAL_CLASS: &str = "Alacritty";
+/// Window classes of terminal emulators, which are never captured. A class also matches
+/// with a dash suffix, such as `Alacritty-scratchpad`.
+const TERMINALS: &[&str] = &[
+    "Alacritty",
+    "foot",
+    "footclient",
+    "kitty",
+    "com.mitchellh.ghostty",
+    "org.wezfurlong.wezterm",
+    "org.gnome.Ptyxis",
+    "org.gnome.Console",
+    "org.gnome.Terminal",
+    "org.kde.konsole",
+    "XTerm",
+    "URxvt",
+    "st-256color",
+    "Terminator",
+    "com.gexperts.Tilix",
+];
 const MAX_WINDOWS: usize = 8;
 
 /// The visible windows of the focused monitor, in reading order. It may be empty.
@@ -107,8 +124,18 @@ fn readable<'a>(monitor: &Monitor, clients: &'a [Client]) -> Vec<&'a Client> {
     monitor
         .windows(clients)
         .into_iter()
-        .filter(|client| !client.class.starts_with(TERMINAL_CLASS))
+        .filter(|client| !terminal(&client.class))
         .collect()
+}
+
+/// Whether `class` names a terminal, ignoring case.
+fn terminal(class: &str) -> bool {
+    TERMINALS.iter().any(|name| {
+        class
+            .get(..name.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(name))
+            && matches!(class.as_bytes().get(name.len()), None | Some(b'-'))
+    })
 }
 
 /// Whether two snapshots list the same windows at the same positions and sizes.
@@ -177,9 +204,16 @@ mod tests {
             client("right", "dev.zed.Zed", 1, [1640.0, 36.0]),
             client("terminal", "Alacritty", 1, [1004.0, 36.0]),
             client("scratchpad", "Alacritty-scratchpad", 1, [1004.0, 400.0]),
+            client("foot", "foot", 1, [1004.0, 400.0]),
+            client("kitty", "kitty", 1, [1004.0, 400.0]),
+            client("ghostty", "com.mitchellh.ghostty", 1, [1004.0, 400.0]),
+            client("steam", "steam", 1, [1004.0, 600.0]),
             client("left", "google-chrome", 1, [1004.0, 36.0]),
         ];
-        assert_eq!(ids(&readable(&monitor(), &clients)), ["left", "right"]);
+        assert_eq!(
+            ids(&readable(&monitor(), &clients)),
+            ["left", "right", "steam"]
+        );
 
         let mut terminal = client("terminal", "Alacritty", 1, [1000.0, 0.0]);
         terminal.fullscreen = 1;

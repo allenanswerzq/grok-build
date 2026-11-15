@@ -2,6 +2,7 @@
 //!
 //! - `xai-screen read` prints the visible windows of the focused monitor as one JSON line.
 //! - `xai-screen draw` reads drawings as JSON lines and shows each above all windows.
+//! - `xai-screen clear` draws with no shapes.
 //!
 //! Fatal errors print `{"error": "..."}` and exit with status 1.
 //!
@@ -19,7 +20,8 @@ fn main() {
     let result = match std::env::args().nth(1).as_deref() {
         Some("read") => read::run(),
         Some("draw") => draw::run(),
-        _ => Err(anyhow::anyhow!("Usage: xai-screen read|draw")),
+        Some("clear") => draw::clear(),
+        _ => Err(anyhow::anyhow!("Usage: xai-screen read|draw|clear")),
     };
     if let Err(error) = result {
         println!("{}", serde_json::json!({ "error": format!("{error:#}") }));

@@ -4,7 +4,8 @@
 //! `{"shapes": [...], "repeat": "..."}`. A line is checked against the drawing rules and the
 //! focused monitor, then shown on a Wayland overlay layer. Each line gets one reply line:
 //! `{"monitor": "...", "width": ..., "height": ...}` once the compositor shows the drawing, or
-//! `{"error": "..."}`. Closing stdin or killing the process removes the drawing.
+//! `{"error": "..."}`. An empty `shapes` list, closing stdin, or killing the process removes the
+//! drawing.
 //!
 //! - [`model`]: what a drawing is: shapes, defaults, rules, and each shape at a given time.
 //! - `paint` and `gpu`: how a drawing looks.
@@ -26,7 +27,12 @@ use model::{Request, Style};
 const MAX_REQUEST: u64 = 1024 * 1024;
 
 pub fn run() -> Result<()> {
-    wayland::run()
+    wayland::run(std::io::BufReader::new(std::io::stdin()))
+}
+
+/// `xai-screen clear`: draw with no shapes.
+pub fn clear() -> Result<()> {
+    wayland::run(&b"{\"shapes\": []}\n"[..])
 }
 
 /// One stdin read.
@@ -36,9 +42,8 @@ enum Input {
     End,
 }
 
-/// Pass each stdin line to `send` until stdin ends or fails, or `send` returns false.
-fn forward_requests(mut send: impl FnMut(Input) -> bool) {
-    let mut reader = std::io::stdin().lock();
+/// Pass each input line to `send` until the input ends or fails, or `send` returns false.
+fn forward_requests(mut reader: impl BufRead, mut send: impl FnMut(Input) -> bool) {
     loop {
         let input = read_request(&mut reader);
         let done = !matches!(input, Input::Line(_));

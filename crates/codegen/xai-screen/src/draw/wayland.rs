@@ -15,6 +15,7 @@
 //! up zooms in.
 
 use std::ffi::c_void;
+use std::io::BufRead;
 use std::ptr::NonNull;
 use std::time::{Duration, Instant};
 
@@ -74,7 +75,7 @@ const DRAG_DEGREES: f64 = 0.5;
 const ZOOM_PER_UNIT: f32 = 0.01;
 const ZOOMS: std::ops::RangeInclusive<f32> = 0.2..=10.0;
 
-pub(super) fn run() -> Result<()> {
+pub(super) fn run(input: impl BufRead + Send + 'static) -> Result<()> {
     let connection = Connection::connect_to_env().context("Cannot connect to Wayland")?;
     let (globals, mut queue) = registry_queue_init::<Overlay>(&connection)?;
     let qh = queue.handle();
@@ -105,7 +106,7 @@ pub(super) fn run() -> Result<()> {
     let (sender, receiver) = channel::sync_channel(4);
     std::thread::Builder::new()
         .name("draw-requests".to_owned())
-        .spawn(move || forward_requests(|input| sender.send(input).is_ok()))?;
+        .spawn(move || forward_requests(input, |input| sender.send(input).is_ok()))?;
     let request_qh = qh.clone();
     event_loop
         .handle()
@@ -298,6 +299,10 @@ impl Overlay {
             Ok(placed) => placed,
             Err(error) => return reply(Err(&error)),
         };
+        if request.shapes.is_empty() {
+            self.drawing = None;
+            return reply(Ok(&monitor));
+        }
         let named = |output: &wl_output::WlOutput| {
             self.outputs
                 .info(output)
